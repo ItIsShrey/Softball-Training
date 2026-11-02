@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1d6a46">
+<title>SMU Softball Trainings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;700&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="css/app.css">
+<style>
+/* Member view: one phone-width column of training cards, big tap targets for replying. */
+main.member{max-width:560px}
+.who{display:grid;gap:6px}
+.who button{text-align:left;padding:12px 14px;font-size:16px;font-weight:500}
+.who button[aria-pressed="true"]{background:var(--field);border-color:var(--field);color:var(--field-ink)}
+input.big{font-size:18px;padding:12px 14px}
+.pinbox{letter-spacing:.5em;font-family:var(--mono);text-align:center;max-width:180px}
+.tr-date{font-family:var(--display);font-weight:700;font-size:28px;line-height:1;text-transform:uppercase}
+.tr-meta{display:flex;gap:6px 14px;flex-wrap:wrap;color:var(--muted);font-size:14px}
+.rsvp{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.rsvp button{padding:14px 10px;font-size:16px;border-radius:10px;border-width:2px}
+.rsvp .y[aria-pressed="true"]{background:var(--good);border-color:var(--good);color:var(--surface)}
+.rsvp .n[aria-pressed="true"]{background:var(--bad);border-color:var(--bad);color:var(--surface)}
+.myteam{border-radius:10px;padding:12px;display:grid;gap:8px;background:var(--sunk);border:1px solid var(--line);border-left:5px solid var(--tc)}
+.myteam.t0{border-left-color:var(--ta)} .myteam.t1{border-left-color:var(--tb)}
+.big-line{font-size:17px;font-weight:700}
+.plan-row{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:14px}
+.plan-row:first-child{border-top:0}
+.plan-row .time{padding-top:1px}
+.names{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:14px}
+.me-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="brand"><span class="ball" aria-hidden="true"></span>SMU Softball</div>
+</div></header>
+<main class="wrap member" id="app"><section class="card"><h2>Loading trainings</h2><p class="muted">Upcoming trainings will show here in a moment.</p></section></main>
+<div class="toast" id="toast" hidden></div>
+
+<script type="module">
+import { db, auth, configured, currentUser, signInGuest } from './js/store.js';
+
+const VENUES={MPSH:'MPSH (hall)',Kallang:'Kallang field',Jurong:'Jurong field'};
+const TEAM=['A','B','C'];
+const POSNAME={P:'Pitcher',C:'Catcher','1B':'First base','2B':'Second base',SS:'Shortstop','3B':'Third base',LF:'Left field',CF:'Centre field',RF:'Right field',R:'Rover'};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const toMin=t=>{const[h,m]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0)};
+const fmt=m=>{const h=Math.floor(m/60),mm=((m%60)+60)%60;return (((h+11)%12)+1)+':'+String(mm).padStart(2,'0')};
+const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const pretty=s=>new Date(s+'T12:00:00').toLocaleDateString('en-SG',{weekday:'short',day:'numeric',month:'short'});
+const blockMin=b=>b.kind==='rotation'?(+b.per||0)*(b.stations||[]).length:(+b.minutes||0);
+const ordinal=n=>n+(['th','st','nd','rd'][(n%100-20)%10]||['th','st','nd','rd'][n%100]||'th');
+const firstName=n=>{n=String(n||'');if(n.includes(','))return n.split(',')[1].trim();return n};
+const norm=s=>String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();
+
+const M={status:'loading',uid:null,me:null,roster:{},sessions:[],rsvps:{},q:'',pick:null,pin:'',err:'',busy:false,open:{}};
+let toastT;
+function toast(msg){const el=$('#toast');el.textContent=msg;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,2600)}
+
+function render(){
+  const app=$('#app');
+  const a=document.activeElement,fid=a&&a.id;
+  if(M.status==='noconfig')app.innerHTML=`<section class="card"><h2>Not set up yet</h2><p class="muted">The club hasn't connected this page to its database yet.</p></section>`;
+  else if(M.status==='loading')return;
+  else if(M.status==='error')app.innerHTML=`<section class="card"><h2>Can't load trainings</h2><p class="muted">Check your connection and reload the page.</p></section>`;
+  else if(M.status==='login')app.innerHTML=loginHTML();
+  else app.innerHTML=homeHTML();
+  if(fid){const el=document.getElementById(fid);if(el&&el!==document.activeElement)el.focus({preventScroll:true})}
+}
+
+function loginHTML(){
+  const names=Object.entries(M.roster).sort((a,b)=>a[1].localeCompare(b[1]));
+  const q=norm(M.q);
+  const hits=q?names.filter(([,n])=>norm(n).includes(q)).slice(0,8):[];
+  const picked=M.pick&&M.roster[M.pick];
+  return `<section class="card"><h2>Who are you?</h2>
+    <p class="muted" style="margin:0">Find your name, then enter the 4-digit PIN your exco sent you. You only need to do this once on this phone.</p>
+    ${picked?`<div class="who"><button aria-pressed="true" data-act="unpick">${esc(picked)} <span class="small" style="float:right;opacity:.8">Change</span></button></div>
+      <label class="f">PIN<input class="big pinbox" id="pin" data-input="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="4" value="${esc(M.pin)}"></label>
+      ${M.err?`<div class="banner bad">${esc(M.err)}</div>`:''}
+      <button class="primary" data-act="claim" style="padding:12px;font-size:16px"${M.busy?' disabled':''}>${M.busy?'Checking…':'Continue'}</button>`
+    :`<label class="f">Your name<input class="big" id="q" data-input="q" value="${esc(M.q)}" placeholder="Start typing your name" autocomplete="off"></label>
+      <div class="who">${hits.map(([id,n])=>`<button data-act="pick" data-id="${esc(id)}">${esc(n)}</button>`).join('')||(q?'<p class="small muted" style="margin:0">No one by that name. Ask an exco to add you.</p>':'')}</div>`}
+  </section>`;
+}
+
+function myRsvp(date){return (M.rsvps[date]||{})[M.me]}
+function trainingHTML(x){
+  const start=toMin(x.start),end=toMin(x.end);
+  const rv=M.rsvps[x.date]||{};const yes=Object.keys(rv).filter(id=>rv[id]===true&&M.roster[id]);const no=Object.keys(rv).filter(id=>rv[id]===false).length;
+  const mine=myRsvp(x.date);
+  const team=x.teamsVisible&&(x.attendees||[]).includes(M.me)?(x.teams||{})[M.me]:null;
+  let teamBox='';
+  if(x.teamsVisible){
+    if(team==null)teamBox=`<div class="myteam"><span class="muted">Teams are out, and you're not on the list for this one. Tell an exco if you're coming.</span></div>`;
+    else{
+      const mates=(x.attendees||[]).filter(id=>(x.teams||{})[id]===team&&id!==M.me&&M.roster[id]).map(id=>M.roster[id]).sort();
+      const hasGame=(x.blocks||[]).some(b=>b.category==='game');
+      const lu=hasGame&&x.lineups&&x.lineups[String(team)];
+      let game='';
+      if(lu){const k=Object.keys(lu.slots||{}).find(s=>lu.slots[s]===M.me);
+        const order=(lu.order&&lu.order.length?lu.order:Object.values(lu.slots||{}));const bat=order.indexOf(M.me);
+        game=k?`<div>Game: <b>${esc(POSNAME[k]||k)}</b>${bat>=0?`, batting <b>${ordinal(bat+1)}</b>`:''}</div>`:`<div class="muted">Game: you start on the bench.</div>`}
+      teamBox=`<div class="myteam t${team}"><div class="big-line">You're in Team ${TEAM[team]}</div>${game}
+        <div class="names muted">${mates.map(esc).join(' · ')||'No teammates yet'}</div></div>`;
+    }
+  }
+  let t=start;
+  const rows=(x.blocks||[]).map(b=>{const s=t;t+=blockMin(b);
+    let what=esc(b.name);
+    if(b.kind==='rotation'&&(b.stations||[]).length){
+      if(team!=null){const n=b.stations.length;what+=`<div class="small muted">${b.stations.map((_,r)=>`${fmt(s+r*b.per)} ${esc(b.stations[(team+r)%n])}`).join('<br>')}</div>`}
+      else what+=`<div class="small muted">${b.stations.map(esc).join(', ')}</div>`}
+    return `<div class="plan-row"><span class="time">${fmt(s)}–${fmt(t)}</span><span>${what}</span></div>`}).join('');
+  return `<section class="card">
+    <div><div class="tr-date">${esc(pretty(x.date))}</div>
+    <div class="tr-meta"><span>${esc(VENUES[x.venue]||x.venue)}</span><span>${fmt(start)}–${fmt(end)}pm</span></div></div>
+    <div class="rsvp" role="group" aria-label="Are you coming?">
+      <button class="y" data-act="rsvp" data-date="${x.date}" data-v="1" aria-pressed="${mine===true}">${mine===true?'✓ ':''}I'm coming</button>
+      <button class="n" data-act="rsvp" data-date="${x.date}" data-v="0" aria-pressed="${mine===false}">${mine===false?'✕ ':''}Can't make it</button>
+    </div>
+    <details${M.open[x.date]?' open':''} data-open="${x.date}"><summary>${yes.length} coming · ${no} can't</summary>
+      <div class="names" style="margin-top:6px">${yes.map(id=>esc(firstName(M.roster[id]))).sort().join(' · ')||'<span class="muted">Nobody yet</span>'}</div></details>
+    ${teamBox}
+    ${rows?`<details><summary>Training plan</summary><div>${rows}</div></details>`:''}
+  </section>`;
+}
+
+function homeHTML(){
+  const today=iso(new Date());
+  const up=M.sessions.filter(x=>x.date>=today).sort((a,b)=>a.date.localeCompare(b.date));
+  return `<div class="me-bar"><span>Hi <b>${esc(firstName(M.roster[M.me]||''))}</b></span><button class="ghost" data-act="switch">Not you?</button></div>
+    ${up.length?up.map(trainingHTML).join(''):`<section class="card"><h2>No trainings posted</h2><p class="muted" style="margin:0">When the excos post the next training, it'll show here and you can reply.</p></section>`}`;
+}
+
+const A={
+  pick({id}){M.pick=id;M.pin='';M.err=''},
+  unpick(){M.pick=null;M.err=''},
+  async claim(){
+    if(!/^\d{4}$/.test(M.pin)){M.err='Enter your 4-digit PIN.';render();return}
+    M.busy=true;M.err='';render();
+    try{await db.doc('claims/'+M.uid).set({memberId:M.pick,pin:M.pin});M.me=M.pick;M.status='home';startData()}
+    catch(e){M.err=e&&e.code==='permission-denied'?"That PIN doesn't match. Check the message from your exco.":"Couldn't check your PIN. Try again."}
+    M.busy=false;render();
+  },
+  async switch(){try{await db.doc('claims/'+M.uid).delete()}catch(e){}M.me=null;M.pick=null;M.pin='';M.status='login';render()},
+  async rsvp({date,v}){
+    const going=v==='1';if(myRsvp(date)===going)return;
+    (M.rsvps[date]=M.rsvps[date]||{})[M.me]=going;render();
+    try{await db.doc('rsvps/'+date+'_'+M.me).set({date,memberId:M.me,going,uid:M.uid,at:new Date().toISOString()});toast(going?"You're down as coming":"Thanks for letting us know")}
+    catch(e){toast("Couldn't save your reply. Try again.")}
+  },
+};
+document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el||el.disabled)return;const r=A[el.dataset.act](el.dataset);if(!(r instanceof Promise))render()});
+document.addEventListener('input',e=>{const k=e.target.dataset.input;if(!k)return;M[k]=e.target.value;if(k==='q')render();if(k==='pin'&&/^\d{4}$/.test(M.pin))A.claim()});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='q'){const first=document.querySelector('.who button');if(first)first.click()}});
+document.addEventListener('toggle',e=>{const d=e.target.dataset&&e.target.dataset.open;if(d)M.open[d]=e.target.open},true);
+
+let dataStarted=false;
+function startData(){
+  if(dataStarted)return;dataStarted=true;
+  const today=iso(new Date());
+  const fail=()=>{M.status='error';render()};
+  db.collection('sessions').where('published','==',true).onSnapshot(s=>{M.sessions=s.docs.map(x=>({...x.data(),date:x.id}));render()},fail);
+  db.collection('rsvps').where('date','>=',today).onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]=v.going});M.rsvps=o;render()},fail);
+}
+
+(async()=>{
+  if(!configured){M.status='noconfig';render();return}
+  try{
+    let u=await currentUser();
+    if(!u){await signInGuest();u=auth.currentUser}
+    M.uid=u.uid;
+    db.collection('roster').onSnapshot(s=>{M.roster=Object.fromEntries(s.docs.map(x=>[x.id,x.data().name]));if(M.status!=='loading')render()},()=>{M.status='error';render()});
+    const c=await db.doc('claims/'+M.uid).get();
+    if(c.exists&&c.data().memberId){M.me=c.data().memberId;M.status='home';startData()}else M.status='login';
+  }catch(e){M.status='error'}
+  render();
+})();
+</script>
+</body>
+</html>

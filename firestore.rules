@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    // Excos sign in with Google; their email must have a doc in /admins (add it in the Firebase console).
+    function isAdmin() {
+      return signedIn() && request.auth.token.email != null
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/admins/$(request.auth.token.email));
+    }
+    function claimedMember() {
+      return get(/databases/$(database)/documents/claims/$(request.auth.uid)).data.memberId;
+    }
+
+    match /admins/{email} { allow read: if isAdmin(); allow write: if false; }
+
+    // Coach-only data: levels, genders, drills, PINs.
+    match /members/{id}    { allow read, write: if isAdmin(); }
+    match /drills/{id}     { allow read, write: if isAdmin(); }
+    match /memberPins/{id} { allow read, write: if isAdmin(); }
+
+    // Names only, so members can find themselves and see teammates.
+    match /roster/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
+
+    // Members see a training only once an exco ticks "Members can see this training".
+    match /sessions/{date} {
+      allow read: if isAdmin() || (signedIn() && resource.data.published == true);
+      allow write: if isAdmin();
+    }
+
+    // A member links this device to their name by proving the PIN. The PIN is checked here, never readable by members.
+    match /claims/{uid} {
+      allow read, delete: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['memberId', 'pin'])
+        && exists(/databases/$(database)/documents/memberPins/$(request.resource.data.memberId))
+        && get(/databases/$(database)/documents/memberPins/$(request.resource.data.memberId)).data.pin == request.resource.data.pin;
+    }
+
+    // Replies: id is <date>_<memberId>. Members may only write their own, for a published training.
+    match /rsvps/{rid} {
+      allow read: if signedIn();
+      allow delete: if isAdmin();
+      allow create, update: if isAdmin() || (
+        signedIn()
+        && request.resource.data.keys().hasOnly(['date', 'memberId', 'going', 'uid', 'at'])
+        && request.resource.data.going is bool
+        && request.resource.data.uid == request.auth.uid
+        && rid == request.resource.data.date + '_' + request.resource.data.memberId
+        && claimedMember() == request.resource.data.memberId
+        && get(/databases/$(database)/documents/sessions/$(request.resource.data.date)).data.published == true
+      );
+    }
+  }
+}
