@@ -12,6 +12,6 @@ export const firebaseConfig = {
 // Telegram login. Fill both after creating the bot and deploying the Worker (README, "Telegram login").
 // Leave them empty to use name + PIN only.
 export const telegram = {
-  bot: '',      // bot username without @, e.g. 'smusoftball_bot'
+  bot: 'smusoftball_bot',  // bot username without @
   authUrl: '',  // Worker URL, e.g. 'https://softball-telegram-auth.<you>.workers.dev/auth/telegram'
 };
