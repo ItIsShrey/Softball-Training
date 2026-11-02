@@ -179,3 +179,9 @@ details[open] summary{margin-bottom:8px}
 .rs.yes{color:var(--good)} .rs.no{color:var(--bad)}
 .chip[aria-pressed="true"] .rs{color:inherit}
 .top .wrap>.ghost{color:inherit;border-color:transparent}
+.att-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.att-bar input{flex:1 1 160px;width:auto}
+.att-bar .seg button{padding:6px 10px;font-size:13px}
+.chips.att{max-height:228px;overflow-y:auto;padding:2px}
+.chips.att .chip{padding:4px 10px;font-size:13px}
+.seg button[aria-pressed="true"] .muted{color:inherit;opacity:.75}

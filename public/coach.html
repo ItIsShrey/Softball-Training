@@ -176,11 +176,15 @@ function planHTML(){
     attend=`<section class="card"><h2>Attendance</h2><div class="empty">No members yet. Add your roster with each player's level and positions, then tick who's coming here.<a href="#members">Add members</a></div></section>`;
   }else{
     const list=[...S.members].filter(m=>m.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
-    attend=`<section class="card"><div class="card-h"><h2>Attendance</h2><span class="muted small">${ppl.length} of ${list.length} coming</span></div>
+    const q=norm(S.attQ||''),af=S.attF||(d.attendees.length?'coming':'all');
+    const shown=list.filter(m=>q?norm(m.name).includes(q):af==='coming'?d.attendees.includes(m.id):af==='yes'?(S.rsvps&&(S.rsvps[d.date]||{})[m.id]===true):true);
+    attend=`<section class="card"><div class="card-h"><h2>Attendance</h2><div class="row" style="gap:4px"><span class="muted small">${ppl.length} of ${list.length} coming</span><button class="ghost" data-act="all">All in</button><button class="ghost" data-act="none">Clear</button></div></div>
       ${rsvpSummary(d,list)}
-      <div class="chips">${list.map(m=>{const rv=(S.rsvps[d.date]||{})[m.id];return `<button class="chip" data-act="toggle" data-id="${esc(m.id)}" aria-pressed="${d.attendees.includes(m.id)}">${rv===true?'<span class="rs yes" title="Replied yes">✓</span>':rv===false?'<span class="rs no" title="Replied no">✕</span>':''}${esc(m.name)}<span class="lvl">L${m.level||'?'}</span></button>`}).join('')}</div>
-      <div class="row"><button data-act="all">Everyone</button><button data-act="none">Clear</button></div>
-      <details${S.paste?' open':''}><summary>Paste names from the Telegram poll</summary>
+      <div class="att-bar"><input id="att-q" data-input="attQ" value="${esc(S.attQ||'')}" placeholder="Find a player" autocomplete="off" aria-label="Find a player">
+        <div class="seg" role="group" aria-label="Show">${[['coming','Coming',ppl.length],['yes','Said yes',list.filter(m=>(S.rsvps[d.date]||{})[m.id]===true).length],['all','All',list.length]].map(([k,l,n])=>`<button data-act="attF" data-v="${k}" aria-pressed="${!q&&af===k}">${l} <span class="muted">${n}</span></button>`).join('')}</div></div>
+      <div class="chips att">${shown.map(m=>{const rv=(S.rsvps[d.date]||{})[m.id];return `<button class="chip" data-act="toggle" data-id="${esc(m.id)}" aria-pressed="${d.attendees.includes(m.id)}">${rv===true?'<span class="rs yes" title="Replied yes">✓</span>':rv===false?'<span class="rs no" title="Replied no">✕</span>':''}${esc(m.name)}<span class="lvl">L${m.level||'?'}</span></button>`}).join('')}</div>
+      ${shown.length?'':`<p class="small muted" style="margin:0">${q?'No player matches that name.':af==='coming'?'Nobody ticked yet. Pick All to choose players.':'Nobody here yet.'}</p>`}
+      <details${S.paste?' open':''}><summary class="small">Paste names from a Telegram poll</summary>
         <div style="display:grid;gap:8px"><textarea id="paste" data-input="paste" placeholder="One name per line, as they appear in the poll voters list">${esc(S.paste)}</textarea>
         <div class="row"><button data-act="paste">Mark these present</button><span class="small muted">${esc(S.pasteMsg)}</span></div></div>
       </details>
@@ -456,6 +460,7 @@ function planText(){
 }
 
 const A={
+  attF({v}){S.attF=v;S.attQ=''},
   toggle({id}){const d=S.draft;const i=d.attendees.indexOf(id);if(i>=0){d.attendees.splice(i,1);delete d.teams[id]}else{d.attendees.push(id);d.teams[id]=smallestTeam(d)}markDirty()},
   all(){const d=S.draft;S.members.filter(m=>m.active!==false).forEach(m=>{if(!d.attendees.includes(m.id))d.attendees.push(m.id)});balanceTeams(d);markDirty()},
   none(){S.draft.attendees=[];S.draft.teams={};markDirty()},
@@ -515,6 +520,7 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('input',e=>{
   const k=e.target.dataset.input;if(!k)return;
+  if(k==='attQ'){S.attQ=e.target.value;render();return}
   if(k==='paste')S.paste=e.target.value;
   else{const [o,f]=k.split('.');S[o][f]=e.target.value}
 });
