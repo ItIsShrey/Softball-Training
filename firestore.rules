@@ -2,11 +2,14 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    // Excos sign in with Google; their email must have a doc in /admins (add it in the Firebase console).
+    // Excos are listed in /admins (added in the Firebase console), by Google email or by Telegram login ID (tg:<number>).
     function isAdmin() {
-      return signedIn() && request.auth.token.email != null
-        && request.auth.token.email_verified == true
-        && exists(/databases/$(database)/documents/admins/$(request.auth.token.email));
+      return signedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        || (request.auth.token.get('email', '') != ''
+            && request.auth.token.get('email_verified', false) == true
+            && exists(/databases/$(database)/documents/admins/$(request.auth.token.email)))
+      );
     }
     function claimedMember() {
       return get(/databases/$(database)/documents/claims/$(request.auth.uid)).data.memberId;
@@ -28,9 +31,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // A member links this device to their name by proving the PIN. The PIN is checked here, never readable by members.
+    // A member links their login (Telegram, or this device) to their name by proving the PIN once.
+    // The PIN is checked here and is never readable by members. Excos can see and remove links.
     match /claims/{uid} {
-      allow read, delete: if signedIn() && request.auth.uid == uid;
+      allow read, delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
       allow create, update: if signedIn() && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['memberId', 'pin'])
         && exists(/databases/$(database)/documents/memberPins/$(request.resource.data.memberId))
