@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Softball Planner · Coach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;700&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="brand"><span class="ball" aria-hidden="true"></span>Session Planner</div>
+  <nav class="tabs" aria-label="Sections">
+    <a href="#plan" data-tab="plan">Plan</a>
+    <a href="#members" data-tab="members">Members</a>
+    <a href="#drills" data-tab="drills">Drills</a>
+    <a href="index.html">Member view</a>
+    <a href="#" id="signout" data-act="signout" hidden>Sign out</a>
+  </nav>
+</div></header>
+<main class="wrap" id="app"><div class="card"><h2>Loading team data</h2><p class="muted">Members, drills and saved plans will appear here in a moment.</p></div></main>
+<div class="toast" id="toast" hidden></div>
+
+<script type="module">
+import { db, auth, configured, currentUser, signInGoogle, logOut } from './js/store.js';
+const VENUES=[{id:'MPSH',label:'MPSH (hall)',kind:'MPSH',from:'15:30',to:'18:00'},{id:'Kallang',label:'Kallang field',kind:'Field',from:'15:30',to:'18:00'},{id:'Jurong',label:'Jurong field',kind:'Field',from:'15:30',to:'18:00'}];
+const venueOf=id=>VENUES.find(v=>v.id===id)||VENUES[0];
+/* problems with the venue's booked slot, as sentences */
+function slotIssues(d){const v=venueOf(d.venue),out=[];const planEnd=toMin(d.start)+d.blocks.reduce((s,b)=>s+blockMin(b),0);
+  if(toMin(d.start)<toMin(v.from))out.push(`Starts at ${fmt(toMin(d.start))}, before the ${v.label} slot opens at ${fmt(toMin(v.from))}.`);
+  if(planEnd>toMin(v.to))out.push(`The timeline runs until ${fmt(planEnd)}, ${planEnd-toMin(v.to)} min past the ${v.label} slot, which ends at ${fmt(toMin(v.to))}.`);
+  else if(toMin(d.end)>toMin(v.to))out.push(`The end time is ${fmt(toMin(d.end))}, after the ${v.label} slot ends at ${fmt(toMin(v.to))}.`);
+  return out}
+const CATS=[['warmup','Warm-up'],['batting','Batting'],['fielding','Fielding'],['pitching','Pitching & catching'],['game','Game'],['fun','Fun finisher'],['admin','Setup & tear-down']];
+const CAT=Object.fromEntries(CATS);
+const LEVELS=['','New','Developing','Solid','Strong','Standout'];
+const POS=[['P','Pitcher'],['C','Catcher'],['IF','Infield'],['OF','Outfield']];
+const TEAM=['A','B','C'];
+const GENDER=[['F','Female'],['M','Male']];
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const venueKind=id=>(VENUES.find(v=>v.id===id)||VENUES[0]).kind;
+const venueLabel=id=>(VENUES.find(v=>v.id===id)||{label:id}).label;
+const toMin=t=>{const[h,m]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0)};
+const fmt=m=>{const h=Math.floor(m/60),mm=((m%60)+60)%60;return (((h+11)%12)+1)+':'+String(mm).padStart(2,'0')};
+const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const dow=s=>new Date(s+'T12:00:00').getDay();
+const pretty=s=>new Date(s+'T12:00:00').toLocaleDateString('en-SG',{weekday:'short',day:'numeric',month:'short'});
+const rid=()=>Math.random().toString(36).slice(2,9);
+const clone=o=>JSON.parse(JSON.stringify(o));
+const blockMin=b=>b.kind==='rotation'?(+b.per||0)*b.stations.length:(+b.minutes||0);
+const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
+const byOrder=(a,b)=>(a.order??0)-(b.order??0)||String(a.name).localeCompare(b.name);
+
+function nextTraining(){const d=new Date();for(let i=0;i<7;i++){const x=new Date(d);x.setDate(d.getDate()+i);if(x.getDay()===3||x.getDay()===5)return iso(x)}return iso(d)}
+
+const S={db:null,user:null,pins:{},roster:{},rsvps:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
+  members:[],drills:[],sessions:{},view:'plan',draft:null,dirty:false,blocksEdited:false,
+  mf:null,df:null,paste:'',pasteMsg:'',confirm:null};
+
+function newMemberForm(){return {id:null,name:'',level:3,pos:[],gender:'',pin:newPin()}}
+function newPin(){return String(Math.floor(Math.random()*10000)).padStart(4,'0')}
+function newDrillForm(){return {id:null,name:'',minutes:15,category:'fielding',venues:['MPSH','Field'],station:false,auto:true,notes:''}}
+S.mf=newMemberForm();S.df=newDrillForm();
+
+/* ---------- plan building ---------- */
+function newDraft(date){
+  const venue=dow(date)===5?'Kallang':'MPSH';
+  const d={date,venue,start:'15:30',end:'18:00',numTeams:venueKind(venue)==='MPSH'?3:2,attendees:[],teams:{},blocks:[]};
+  d.blocks=autoBlocks(d);return d;
+}
+function loadDraft(date){
+  S.dirty=false;S.blocksEdited=false;S.pasteMsg='';
+  const saved=S.sessions[date];
+  if(saved){S.blocksEdited=true;return Object.assign({teams:{},attendees:[],blocks:[]},clone(saved))}
+  return newDraft(date);
+}
+function drillBlock(x,mins){return {id:rid(),kind:'drill',name:x.name,category:x.category,minutes:mins??x.minutes}}
+function autoBlocks(d){
+  const kind=venueKind(d.venue);
+  const total=toMin(d.end)-toMin(d.start);
+  const lib=S.drills.filter(x=>x.auto&&(x.venues||[]).includes(kind)).sort(byOrder);
+  const warm=lib.filter(x=>x.category==='warmup');
+  const tail=lib.filter(x=>x.category==='admin');
+  const fun=lib.filter(x=>x.category==='fun').slice(0,1);
+  const sum=a=>a.reduce((s,x)=>s+(+x.minutes||0),0);
+  let avail=total-sum(warm)-sum(tail)-sum(fun);
+  const blocks=warm.map(x=>drillBlock(x));
+  const mids=[];
+  if(kind==='MPSH'){
+    const n=Math.max(2,d.numTeams);
+    const bats=lib.filter(x=>x.station&&x.category==='batting');
+    const others=lib.filter(x=>x.station&&x.category!=='batting');
+    let st=[...bats.slice(0,n-1),...others.slice(0,1)];
+    for(const x of [...bats,...others]){if(st.length>=n)break;if(!st.includes(x))st.push(x)}
+    if(st.length){
+      const per=Math.max(5,Math.floor(avail/st.length/5)*5);
+      mids.push({id:rid(),kind:'rotation',name:'Station rotation',per,stations:st.map(x=>x.name)});
+      avail-=per*st.length;
+    }
+    lib.filter(x=>!x.station&&!['warmup','admin','fun'].includes(x.category)).forEach(x=>{if(avail>=x.minutes){mids.push(drillBlock(x));avail-=x.minutes}});
+  }else{
+    lib.filter(x=>!['warmup','admin','fun'].includes(x.category)).forEach(x=>{mids.push(drillBlock(x));avail-=x.minutes});
+  }
+  const funB=fun.map(x=>drillBlock(x));
+  if(avail>0){
+    const stretch=funB[0]||[...mids].reverse().find(b=>b.kind==='drill');
+    if(stretch)stretch.minutes+=avail;
+  }
+  return [...blocks,...mids,...funB,...tail.map(x=>drillBlock(x))];
+}
+function balanceTeams(d){
+  const n=d.numTeams;
+  const ps=d.attendees.map(id=>S.members.find(m=>m.id===id)).filter(Boolean)
+    .map(m=>({m,r:Math.random()})).sort((a,b)=>(b.m.level||0)-(a.m.level||0)||a.r-b.r).map(x=>x.m);
+  const t={};
+  if(d.evenGender){
+    // greedy: fewest of this player's gender first, then lowest level total, then fewest players
+    const g=Array.from({length:n},()=>({F:0,M:0,'':0,sum:0,n:0}));
+    ps.forEach(m=>{const k=m.gender||'';let best=0;
+      for(let i=1;i<n;i++){const a=g[i],b=g[best];if(a[k]<b[k]||(a[k]===b[k]&&(a.sum<b.sum||(a.sum===b.sum&&a.n<b.n))))best=i}
+      t[m.id]=best;g[best][k]++;g[best].sum+=m.level||0;g[best].n++});
+  }else ps.forEach((m,i)=>{const round=Math.floor(i/n),pos=i%n;t[m.id]=round%2?n-1-pos:pos});
+  d.teams=t;
+}
+function teamOf(d,id){const t=d.teams[id];return (t==null||t>=d.numTeams)?null:t}
+function smallestTeam(d){const c=Array(d.numTeams).fill(0);d.attendees.forEach(id=>{const t=teamOf(d,id);if(t!=null)c[t]++});return c.indexOf(Math.min(...c))}
+function teamRoster(d,t){return d.attendees.map(id=>S.members.find(m=>m.id===id)).filter(m=>m&&teamOf(d,m.id)===t).sort((a,b)=>(b.level||0)-(a.level||0)||a.name.localeCompare(b.name))}
+function present(d){return d.attendees.map(id=>S.members.find(m=>m.id===id)).filter(Boolean)}
+
+/* ---------- rendering ---------- */
+function render(){
+  document.querySelectorAll('[data-tab]').forEach(a=>a.setAttribute('aria-current',a.dataset.tab===S.view?'page':'false'));
+  const app=$('#app');
+  const so=$('#signout');if(so)so.hidden=!S.user;
+  if(S.status==='loading')return;
+  if(S.status==='noconfig'){app.innerHTML=`<section class="card"><h2>Connect Firebase</h2><p class="muted">Paste your Firebase web config into <code>js/firebase-config.js</code> and reload. The README has the steps.</p></section>`;return}
+  if(S.status==='signin'){app.innerHTML=`<section class="card" style="max-width:460px"><h2>Coach sign-in</h2><p class="muted">Sign in with the Google account your exco list uses. Members use the <a href="index.html">member page</a> instead.</p><div class="row"><button class="primary" data-act="signin">Sign in with Google</button></div></section>`;return}
+  if(S.status==='denied'){app.innerHTML=`<section class="card" style="max-width:520px"><h2>Not on the exco list</h2><p class="muted">${esc(S.user&&S.user.email||'This account')} can't open the coach view. Ask the owner to add your email to the exco list in Firebase, then reload.</p><div class="row"><button data-act="signout">Use another account</button></div></section>`;return}
+  const a=document.activeElement,fid=a&&a.id;let sel=null;
+  try{if(a&&'selectionStart' in a)sel=[a.selectionStart,a.selectionEnd]}catch(e){}
+  const banner=S.readOnly?`<div class="banner">Your changes aren't being saved. Check that your email is on the exco list.</div>`:'';
+  app.innerHTML=banner+(S.view==='members'?membersHTML():S.view==='drills'?drillsHTML():planHTML());
+  if(fid){const el=document.getElementById(fid);if(el&&el!==document.activeElement){el.focus({preventScroll:true});try{if(sel&&sel[0]!=null)el.setSelectionRange(sel[0],sel[1])}catch(e){}}}
+}
+
+function planHTML(){
+  const d=S.draft,kind=venueKind(d.venue);
+  const total=toMin(d.end)-toMin(d.start);
+  const planned=d.blocks.reduce((s,b)=>s+blockMin(b),0);
+  const diff=total-planned;
+  const ppl=present(d);
+  const saved=S.sessions[d.date];
+  const stateTxt=S.dirty?'Unsaved changes':saved?'Saved':'Not saved yet';
+  const budget=diff===0?`<span class="pill good">Fills ${fmt(toMin(d.start))}–${fmt(toMin(d.end))}</span>`
+    :diff>0?`<span class="pill warn">${diff} min unplanned</span>`:`<span class="pill bad">Over by ${-diff} min</span>`;
+
+  const session=`<section class="card"><div class="card-h"><h2>Session</h2><span class="muted small">${esc(pretty(d.date))}</span></div>
+    <div class="g2">
+      <label class="f">Date<input type="date" id="f-date" data-f="date" value="${esc(d.date)}"></label>
+      <label class="f">Venue<select id="f-venue" data-f="venue">${VENUES.map(v=>`<option value="${v.id}"${v.id===d.venue?' selected':''}>${esc(v.label)}</option>`).join('')}</select></label>
+      <label class="f">Start<input type="time" id="f-start" data-f="start" value="${esc(d.start)}"></label>
+      <label class="f">End<input type="time" id="f-end" data-f="end" value="${esc(d.end)}"></label>
+    </div>
+    <div style="display:grid;gap:6px"><label class="check"><input type="checkbox" id="f-pub" data-fb="published"${d.published?' checked':''}><span>Members can see this training and reply Yes or No</span></label>
+      <label class="check"><input type="checkbox" id="f-tv" data-fb="teamsVisible"${d.teamsVisible?' checked':''}${d.published?'':' disabled'}><span>Show teams and game lineups to members</span></label></div>
+    <div class="row"><span class="eyebrow">Teams</span><div class="seg" role="group" aria-label="Number of teams">${[2,3].map(n=>`<button data-act="teams" data-n="${n}" aria-pressed="${d.numTeams===n}">${n}</button>`).join('')}</div>
+    <span class="muted small">${kind==='MPSH'?'MPSH usually runs 2 batting stations and 1 fielding.':'Field days run drills one after another.'}</span></div>
+  </section>`;
+
+  let attend;
+  if(!S.members.length){
+    attend=`<section class="card"><h2>Attendance</h2><div class="empty">No members yet. Add your roster with each player's level and positions, then tick who's coming here.<a href="#members">Add members</a></div></section>`;
+  }else{
+    const list=[...S.members].filter(m=>m.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
+    attend=`<section class="card"><div class="card-h"><h2>Attendance</h2><span class="muted small">${ppl.length} of ${list.length} coming</span></div>
+      ${rsvpSummary(d,list)}
+      <div class="chips">${list.map(m=>{const rv=(S.rsvps[d.date]||{})[m.id];return `<button class="chip" data-act="toggle" data-id="${esc(m.id)}" aria-pressed="${d.attendees.includes(m.id)}">${rv===true?'<span class="rs yes" title="Replied yes">✓</span>':rv===false?'<span class="rs no" title="Replied no">✕</span>':''}${esc(m.name)}<span class="lvl">L${m.level||'?'}</span></button>`}).join('')}</div>
+      <div class="row"><button data-act="all">Everyone</button><button data-act="none">Clear</button></div>
+      <details${S.paste?' open':''}><summary>Paste names from the Telegram poll</summary>
+        <div style="display:grid;gap:8px"><textarea id="paste" data-input="paste" placeholder="One name per line, as they appear in the poll voters list">${esc(S.paste)}</textarea>
+        <div class="row"><button data-act="paste">Mark these present</button><span class="small muted">${esc(S.pasteMsg)}</span></div></div>
+      </details>
+    </section>`;
+  }
+
+  let teams='';
+  if(ppl.length){
+    const overall=avg(ppl.map(m=>m.level||0));
+    teams=`<section class="card"><div class="card-h"><h2>Teams</h2><div class="row"><label class="check small"><input type="checkbox" id="f-eg" data-f="evenGender"${d.evenGender?' checked':''}><span>Even out genders</span></label><button data-act="balance">Balance teams</button></div></div>
+      <div class="teams">${Array.from({length:d.numTeams},(_,t)=>{const r=teamRoster(d,t);const a=avg(r.map(m=>m.level||0));
+        return `<div class="team t${t}"><div class="team-h"><h3>Team ${TEAM[t]}</h3><span class="small muted">${r.length} players${gCount(r)}</span></div>
+        <div><div class="row small" style="justify-content:space-between"><span class="muted">Avg level</span><b style="font-family:var(--mono)">${r.length?a.toFixed(1):'–'}</b></div><div class="meter"><i style="width:${a/5*100}%"></i></div></div>
+        <div class="plist">${r.map(m=>`<button data-act="move" data-id="${esc(m.id)}" title="Move to the next team"><span>${esc(m.name)} <span class="pos">${esc([m.gender,...(m.pos||[])].filter(Boolean).join(' '))}</span></span><span class="lvl">L${m.level||'?'}</span></button>`).join('')||'<span class="small muted">Nobody yet</span>'}</div></div>`}).join('')}</div>
+      <p class="small muted" style="margin:0">Squad average ${overall.toFixed(1)}${gCount(ppl)}. Tap a player to move them to the next team.</p>
+    </section>`;
+  }
+
+  let t=toMin(d.start);
+  const rows=d.blocks.map((b,i)=>{const s=t;t+=blockMin(b);const e=t;
+    const ctrl=`<div class="ctrl"><button class="ghost" data-act="up" data-i="${i}" aria-label="Move up"${i===0?' disabled':''}>↑</button><button class="ghost" data-act="down" data-i="${i}" aria-label="Move down"${i===d.blocks.length-1?' disabled':''}>↓</button><button class="ghost danger" data-act="del" data-i="${i}" aria-label="Remove">✕</button></div>`;
+    if(b.kind!=='rotation')return `<div class="blk"><span class="time">${fmt(s)}–${fmt(e)}</span><span class="bn">${esc(b.name)}<small>${esc(CAT[b.category]||'')}</small></span>
+      <div class="row" style="gap:6px;justify-content:flex-end"><label class="mins"><input type="number" min="0" step="5" id="m-${b.id}" data-bf="minutes" data-i="${i}" value="${b.minutes}" aria-label="Minutes for ${esc(b.name)}">min</label>${ctrl}</div></div>`;
+    const ns=b.stations.length;
+    const used=new Set(b.stations);
+    const opts=S.drills.filter(x=>(x.venues||[]).includes(kind)&&!['warmup','admin'].includes(x.category)&&!used.has(x.name)).sort(byOrder);
+    const table=ns?`<div class="rtable"><table><thead><tr><th>Round</th>${Array.from({length:d.numTeams},(_,k)=>`<th><span class="tdot t${k}"></span>Team ${TEAM[k]}</th>`).join('')}</tr></thead><tbody>
+      ${b.stations.map((_,r)=>`<tr><td class="time">${fmt(s+r*b.per)}–${fmt(s+(r+1)*b.per)}</td>${Array.from({length:d.numTeams},(_,k)=>`<td>${esc(b.stations[(k+r)%ns])}</td>`).join('')}</tr>`).join('')}
+      </tbody></table></div>`:'<span class="small muted">Add at least one station.</span>';
+    return `<div class="blk rot"><div class="rot-h"><span class="time">${fmt(s)}–${fmt(e)}</span><span class="bn">${esc(b.name)}<small>${ns} rounds, every team visits every station</small></span>
+      <div class="row" style="gap:6px;justify-content:flex-end"><label class="mins"><input type="number" min="5" step="5" id="p-${b.id}" data-bf="per" data-i="${i}" value="${b.per}" aria-label="Minutes per round">min/round</label>${ctrl}</div></div>
+      <div class="stations">${b.stations.map((n,j)=>`<span class="st">${esc(n)}<button data-act="stdel" data-i="${i}" data-j="${j}" aria-label="Remove ${esc(n)}">✕</button></span>`).join('')}
+        ${opts.length?`<select id="sa-${b.id}" data-act-change="stadd" data-i="${i}" aria-label="Add a station"><option value="">+ Station</option>${opts.map(x=>`<option>${esc(x.name)}</option>`).join('')}</select>`:''}</div>
+      ${table}</div>`;
+  }).join('');
+  const addOpts=[...S.drills].sort((a,b)=>((a.venues||[]).includes(kind)?0:1)-((b.venues||[]).includes(kind)?0:1)||byOrder(a,b));
+  const issues=slotIssues(d);
+  const warn=issues.length?`<div class="banner bad" role="alert"><b>Over the venue booking.</b> ${issues.map(esc).join(' ')}</div>`:'';
+  const timeline=`<section class="card"><div class="card-h"><h2>Timeline</h2>${budget}</div>${warn}
+    ${d.blocks.length?`<div class="tl">${rows}</div>`:`<div class="empty">${S.drills.length?'No blocks yet. Build one from your usual drills or add drills below.':'Add your drills in the Drills tab, then build the plan from them.'}${S.drills.length?'':'<a href="#drills">Add drills</a>'}</div>`}
+    <div class="addbar"><select id="add-drill" aria-label="Drill to add"><option value="">Add a drill…</option>${addOpts.map(x=>`<option value="${esc(x.id)}">${esc(x.name)} · ${x.minutes} min</option>`).join('')}</select><button data-act="add">Add</button><button data-act="addrot">Add rotation</button></div>
+    <div class="row"><button data-act="rebuild">${S.confirm==='rebuild'?'Tap again to replace the timeline':'Rebuild from usual drills'}</button></div>
+  </section>`;
+
+  const list=Object.values(S.sessions).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,12);
+  const savedCard=`<section class="card"><h2>Saved plans</h2>${list.length?`<div class="saved">${list.map(x=>`<button data-act="open" data-date="${x.date}" aria-current="${x.date===d.date}"><span>${esc(pretty(x.date))} · ${esc(venueLabel(x.venue))}</span><span class="muted small">${(x.attendees||[]).length} coming</span></button>`).join('')}</div>`:'<p class="muted small" style="margin:0">Plans you save show up here for your captain and excos too.</p>'}</section>`;
+
+  const actions=`<div class="actions"><span class="st-txt">${esc(pretty(d.date))} · ${stateTxt}${issues.length?' · <b style="color:var(--bad)">runs past the booking</b>':''}</span>
+    ${saved?`<button class="ghost danger" data-act="delsess">${S.confirm==='delsess'?'Tap again to delete':'Delete'}</button>`:''}
+    <button data-act="copy">Copy for Telegram</button><button class="primary" data-act="save"${S.readOnly?' disabled':''}>Save plan</button></div>`;
+
+  return `<div class="cols"><div class="stack">${session}${attend}${teams}</div><div class="stack">${timeline}${savedCard}</div></div>${gameHTML(d)}${actions}`;
+}
+
+function gCount(r){const f=r.filter(m=>m.gender==='F').length,m=r.filter(m=>m.gender==='M').length;return (f||m)?` · ${f}F ${m}M`:''}
+function rsvpSummary(d,list){
+  const rv=S.rsvps[d.date]||{};const yes=list.filter(m=>rv[m.id]===true),no=list.filter(m=>rv[m.id]===false);
+  if(!d.published&&!yes.length&&!no.length)return `<p class="small muted" style="margin:0">Tick "Members can see this training" and save to open the poll in the member view.</p>`;
+  const missing=yes.filter(m=>!d.attendees.includes(m.id)).length;
+  return `<div class="row small"><span class="pill good">${yes.length} yes</span><span class="pill bad">${no.length} no</span><span class="muted">${list.length-yes.length-no.length} no reply</span>${missing?`<button data-act="rsvpYes">Tick the ${missing} who said yes</button>`:''}</div>`;
+}
+function dots(n){return `<span class="dots" aria-label="Level ${n} of 5">${[1,2,3,4,5].map(i=>`<i class="${i<=n?'on':''}"></i>`).join('')}</span>`}
+
+function membersHTML(){
+  const ms=[...S.members].sort((a,b)=>a.name.localeCompare(b.name));
+  const counts=[1,2,3,4,5].map(l=>ms.filter(m=>m.level===l).length);const max=Math.max(1,...counts);
+  const f=S.mf;
+  const summary=ms.length?`<section class="card"><div class="stats">
+      <div class="stat"><b>${ms.length}</b><span class="small muted">members</span></div>
+      <div class="stat"><b>${avg(ms.map(m=>m.level||0)).toFixed(1)}</b><span class="small muted">average level</span></div>
+      <div class="stat"><div class="dist">${counts.map((c,i)=>`<div><span style="height:${c/max*30}px"></span>L${i+1}</div>`).join('')}</div><span class="small muted">spread by level</span></div>
+      <div class="stat"><b>${ms.filter(m=>(m.pos||[]).includes('P')).length}/${ms.filter(m=>(m.pos||[]).includes('C')).length}</b><span class="small muted">pitchers / catchers</span></div>
+      <div class="stat"><b>${ms.filter(m=>m.gender==='F').length}/${ms.filter(m=>m.gender==='M').length}</b><span class="small muted">female / male</span></div>
+    </div></section>`:'';
+  const form=`<section class="card"><h2>${f.id?'Edit member':'Add a member'}</h2>
+    <label class="f">Name<input id="mf-name" data-input="mf.name" value="${esc(f.name)}" placeholder="As shown in the Telegram group" autocomplete="off"></label>
+    <div style="display:grid;gap:6px"><span class="eyebrow">Proficiency level</span>
+      <div class="seg" role="group" aria-label="Proficiency level" style="flex-wrap:wrap">${[1,2,3,4,5].map(l=>`<button data-act="mlevel" data-n="${l}" aria-pressed="${f.level===l}">${l} · ${LEVELS[l]}</button>`).join('')}</div></div>
+    <div style="display:grid;gap:6px"><span class="eyebrow">Gender</span>
+      <div class="seg" role="group" aria-label="Gender">${GENDER.map(([k,l])=>`<button data-act="mgender" data-g="${k}" aria-pressed="${f.gender===k}">${l}</button>`).join('')}</div></div>
+    <div style="display:grid;gap:6px"><span class="eyebrow">Positions</span>
+      <div class="chips">${POS.map(([k,l])=>`<button class="chip" data-act="mpos" data-p="${k}" aria-pressed="${f.pos.includes(k)}">${l}</button>`).join('')}</div></div>
+    <label class="f">Member PIN<div class="row" style="flex-wrap:nowrap"><input id="mf-pin" data-input="mf.pin" value="${esc(f.pin)}" inputmode="numeric" maxlength="4" placeholder="4 digits" style="max-width:120px"><button data-act="mpin">New PIN</button></div><span class="small muted" style="font-weight:400">They use this with their name to reply to trainings.</span></label>
+    <div class="row"><button class="primary" data-act="msave"${S.readOnly?' disabled':''}>${f.id?'Save changes':'Add member'}</button>${f.id?'<button data-act="mcancel">Cancel</button>':''}</div>
+  </section>`;
+  const list=`<section class="card"><h2>Roster</h2>${ms.length?`<div class="list">${ms.map(m=>`<div class="li"><div><div class="nm">${esc(m.name)}</div><div class="small muted">${S.pins[m.id]?'':'<span class="pill warn" style="padding:0 6px;font-size:11px">no PIN</span> '}${dots(m.level||0)} ${esc(LEVELS[m.level]||'')}${m.gender?' · '+esc((GENDER.find(x=>x[0]===m.gender)||[,''])[1]):''}${(m.pos||[]).length?' · '+esc(m.pos.map(p=>(POS.find(x=>x[0]===p)||[,p])[1]).join(', ')):''}</div></div>
+      <div class="row"><button class="ghost" data-act="medit" data-id="${esc(m.id)}">Edit</button><button class="ghost danger" data-act="mdel" data-id="${esc(m.id)}">${S.confirm==='m'+m.id?'Tap again':'Delete'}</button></div></div>`).join('')}</div>`
+    :'<div class="empty">Your roster is empty. Add each player with a level from 1 (new) to 5 (standout) so teams can be balanced.</div>'}</section>`;
+  const nopin=ms.filter(m=>!S.pins[m.id]).length;
+  const pins=ms.length?`<section class="card"><div class="card-h"><h2>Member PINs</h2><div class="row">${nopin?`<button data-act="pinsAll">Give PINs to ${nopin} without one</button>`:''}<button data-act="pinsCopy">Copy PIN list</button></div></div><p class="small muted" style="margin:0">Members sign in on the member page with their name and PIN. Send each person their own PIN.</p></section>`
+    :`<section class="card"><h2>Import roster</h2><p class="small muted" style="margin:0">Load the backup file with your members and drills to get started.</p><input type="file" id="import-file" accept="application/json,.json"></section>`;
+  return `<div class="cols"><div class="stack">${form}${pins}</div><div class="stack">${summary}${list}</div></div>`;
+}
+
+function drillsHTML(){
+  const f=S.df;
+  const form=`<section class="card"><h2>${f.id?'Edit drill':'Add a drill'}</h2>
+    <label class="f">Name<input id="df-name" data-input="df.name" value="${esc(f.name)}" placeholder="e.g. Soft toss" autocomplete="off"></label>
+    <div class="g2"><label class="f">Usual minutes<input type="number" min="0" step="5" id="df-min" data-input="df.minutes" value="${f.minutes}"></label>
+      <label class="f">Type<select id="df-cat" data-dchange="category">${CATS.map(([k,l])=>`<option value="${k}"${k===f.category?' selected':''}>${l}</option>`).join('')}</select></label></div>
+    <div style="display:grid;gap:6px"><span class="eyebrow">Works at</span><div class="chips">${[['MPSH','MPSH'],['Field','Field (Kallang, Jurong)']].map(([k,l])=>`<button class="chip" data-act="dvenue" data-v="${k}" aria-pressed="${f.venues.includes(k)}">${l}</button>`).join('')}</div></div>
+    <label class="check"><input type="checkbox" id="df-station" data-dchange="station"${f.station?' checked':''}><span>Runs as a station alongside other drills, with teams rotating through</span></label>
+    <label class="check"><input type="checkbox" id="df-auto" data-dchange="auto"${f.auto?' checked':''}><span>Include when building a plan automatically</span></label>
+    <label class="f">Notes<textarea id="df-notes" data-input="df.notes" placeholder="Equipment, setup, coaching points" style="min-height:60px">${esc(f.notes)}</textarea></label>
+    <div class="row"><button class="primary" data-act="dsave"${S.readOnly?' disabled':''}>${f.id?'Save changes':'Add drill'}</button>${f.id?'<button data-act="dcancel">Cancel</button>':''}</div>
+  </section>`;
+  const groups=CATS.map(([k,l])=>{const xs=S.drills.filter(x=>x.category===k).sort(byOrder);if(!xs.length)return '';
+    return `<div style="display:grid;gap:6px"><span class="eyebrow">${l}</span><div class="list">${xs.map(x=>`<div class="li"><div><div class="nm">${esc(x.name)} <span class="muted small" style="font-family:var(--mono)">${x.minutes} min</span></div>
+      <div class="small muted">${esc((x.venues||[]).join(' + '))}${x.station?' · station':''}${x.auto?' · in auto plan':''}${x.notes?' · '+esc(x.notes):''}</div></div>
+      <div class="row"><button class="ghost" data-act="dedit" data-id="${esc(x.id)}">Edit</button><button class="ghost danger" data-act="ddel" data-id="${esc(x.id)}">${S.confirm==='d'+x.id?'Tap again':'Delete'}</button></div></div>`).join('')}</div></div>`}).join('');
+  return `<div class="cols"><div class="stack">${form}</div><div class="stack"><section class="card"><h2>Drill library</h2>${S.drills.length?groups:'<div class="empty">No drills yet. Add the ones you run most, with their usual length, so plans can be built from them.</div>'}</section></div></div>`;
+}
+
+/* ---------- game lineups (one per team, stored in the session plan) ---------- */
+const SLOTS=[['P','Pitcher',200,262],['C','Catcher',200,358],['1B','First base',300,240],['2B','Second base',256,178],['SS','Shortstop',144,178],['3B','Third base',100,240],['LF','Left field',74,104],['CF','Centre field',200,52],['RF','Right field',326,104],['R','Rover',200,122]];
+const SLOTFIT={P:'P',C:'C','1B':'IF','2B':'IF','SS':'IF','3B':'IF',LF:'OF',CF:'OF',RF:'OF',R:'OF'};
+const activeSlots=lu=>SLOTS.filter(x=>x[0]!=='R'||lu.useSF!==false);
+const mem=id=>S.members.find(m=>m.id===id);
+function shortName(n){n=String(n||'');if(n.includes(',')){const[a,b]=n.split(',');return b.trim()+' '+a.trim().split(' ')[0]}return n}
+function LU(){const d=S.draft;if(!d.lineups)d.lineups={};if(S.luTeam>=d.numTeams)S.luTeam=0;const k=String(S.luTeam);if(!d.lineups[k])d.lineups[k]={slots:{},order:[],useSF:true};return d.lineups[k]}
+function hasGame(d){return d.blocks.some(b=>b.category==='game')}
+function poolPlayers(lu){
+  const ps=teamRoster(S.draft,S.luTeam);
+  Object.values(lu.slots).forEach(id=>{if(id&&!ps.some(m=>m.id===id)){const m=mem(id);if(m)ps.push(m)}});
+  return ps.sort((a,b)=>a.name.localeCompare(b.name));
+}
+function onField(lu){return activeSlots(lu).map(x=>lu.slots[x[0]]).filter(id=>id&&mem(id))}
+function battingOrder(lu){const f=onField(lu);return [...(lu.order||[]).filter(id=>f.includes(id)),...f.filter(id=>!(lu.order||[]).includes(id))]}
+function assign(id,from,to){
+  const sl=LU().slots;
+  if(to==='bench'){if(from!=='bench')delete sl[from]}
+  else{const occ=sl[to];for(const k in sl)if(sl[k]===id)delete sl[k];sl[to]=id;if(from!=='bench'&&from!==to&&occ&&occ!==id)sl[from]=occ}
+  markDirty();
+}
+function fits(m,k){return (m.pos||[]).includes(SLOTFIT[k])}
+function autoFill(lu){
+  const used=new Set(onField(lu));
+  const bench=()=>poolPlayers(lu).filter(m=>!used.has(m.id)).sort((a,b)=>(b.level||0)-(a.level||0));
+  for(const pass of [true,false])for(const [k] of activeSlots(lu)){if(lu.slots[k])continue;const m=bench().find(m=>!pass||fits(m,k));if(m){lu.slots[k]=m.id;used.add(m.id)}}
+}
+function fieldSVG(){return `<svg viewBox="0 0 400 390" aria-hidden="true">
+  <path d="M200 350 L16 166 Q200 -64 384 166 Z" fill="var(--grass)"/>
+  <path d="M200 350 L16 166 Q200 -64 384 166 Z" fill="none" stroke="var(--chalk)" stroke-width="2" opacity=".7"/>
+  <path d="M200 362 L88 250 Q200 112 312 250 Z" fill="var(--dirt)"/>
+  <path d="M200 334 L268 266 L200 198 L132 266 Z" fill="var(--grass2)"/>
+  <path d="M200 350 L292 258 L200 166 L108 258 Z" fill="none" stroke="var(--chalk)" stroke-width="2"/>
+  <circle cx="200" cy="262" r="9" fill="var(--dirt)" stroke="var(--chalk)" stroke-width="1.5"/>
+  <rect x="286" y="252" width="12" height="12" transform="rotate(45 292 258)" fill="var(--chalk)"/>
+  <rect x="194" y="160" width="12" height="12" transform="rotate(45 200 166)" fill="var(--chalk)"/>
+  <rect x="102" y="252" width="12" height="12" transform="rotate(45 108 258)" fill="var(--chalk)"/>
+  <path d="M193 346 h14 v6 l-7 6 l-7 -6 z" fill="var(--chalk)"/></svg>`}
+
+function gameHTML(d){
+  if(!hasGame(d)){
+    const g=S.drills.find(x=>x.category==='game');
+    return `<section class="card"><div class="card-h"><h2>Game lineups</h2>${g?`<button data-act="addGame">Add a game to this plan</button>`:''}</div><p class="small muted" style="margin:0">When the timeline includes a game, you can set each team's fielding positions and batting order here.</p></section>`;
+  }
+  const lu=LU(),sel=S.sel,t=S.luTeam;
+  const ps=poolPlayers(lu),fieldIds=onField(lu);
+  const bench=ps.filter(m=>!fieldIds.includes(m.id));
+  const fm=fieldIds.map(mem),need=activeSlots(lu).length;
+  const head=`<div class="card-h"><h2>Game lineups</h2><div class="row">
+      <div class="seg" role="group" aria-label="Team">${Array.from({length:d.numTeams},(_,k)=>`<button data-act="luTeam" data-n="${k}" aria-pressed="${k===t}"><span class="tdot t${k}"></span>Team ${TEAM[k]}</button>`).join('')}</div>
+      <div class="seg" role="group" aria-label="View">${[['field','Field'],['list','List']].map(([k,l])=>`<button data-act="luView" data-v="${k}" aria-pressed="${S.luView===k}">${l}</button>`).join('')}</div></div></div>
+    <div class="row small"><span class="pill ${fieldIds.length===need?'good':'warn'}">${fieldIds.length}/${need} on the field</span>${fm.length?`<span class="muted">Avg level ${avg(fm.map(m=>m.level||0)).toFixed(1)}${gCount(fm)}</span>`:''}
+      <label class="check small"><input type="checkbox" id="lu-sf" data-lf="useSF"${lu.useSF!==false?' checked':''}><span>Play a rover (10 fielders)</span></label></div>`;
+  let main;
+  if(!ps.length)main=`<div class="empty">Team ${TEAM[t]} has nobody yet. Tick who's coming in Attendance and the teams fill in.</div>`;
+  else if(S.luView==='field'){
+    main=`<div class="pitch">${fieldSVG()}${activeSlots(lu).map(([k,l,x,y])=>{const m=mem(lu.slots[k]);
+      return `<button class="slot${m?'':' empty'}${m&&(m.pos||[]).length&&!fits(m,k)?' off':''}" style="left:${x/4}%;top:${y/3.9}%" data-act="luSlot" data-slot="${k}" ${m?`data-drag="${esc(m.id)}" data-from="${k}"`:''} aria-pressed="${!!(sel&&sel.from===k)}" aria-label="${l}${m?': '+esc(m.name):', empty'}"><b>${k}</b><span class="nm">${m?esc(shortName(m.name)):'Empty'}</span></button>`}).join('')}</div>
+      <div class="bench" data-bench="1" data-act="luBench"><div class="card-h"><h3>Team ${TEAM[t]} bench · ${bench.length}</h3><span class="small muted">${sel&&sel.from!=='bench'?'Tap here to move the selected player to the bench':'Drop a player here to take them off the field'}</span></div>
+      <div class="chips">${bench.map(m=>`<button class="chip${sel&&sel.id===m.id?' sel':''}" data-act="luTap" data-id="${esc(m.id)}" data-drag="${esc(m.id)}" data-from="bench">${esc(shortName(m.name))}<span class="pos">${esc([m.gender,...(m.pos||[])].filter(Boolean).join(' '))}</span><span class="lvl">L${m.level||'?'}</span></button>`).join('')||'<span class="small muted">Everyone on this team is on the field.</span>'}</div></div>
+      <p class="small muted" style="margin:0">Drag players onto a position, or tap a player and then tap a position. On a phone, hold a player for a moment before dragging. An orange border means the player doesn't usually play there.</p>`;
+  }else{
+    main=`<div style="overflow-x:auto"><table class="ltable"><thead><tr><th>Pos</th><th>Player</th><th>Level</th></tr></thead><tbody>
+      ${activeSlots(lu).map(([k,l])=>{const m=mem(lu.slots[k]);return `<tr><td title="${l}">${k}</td><td><select id="ls-${k}" data-lslot="${k}" aria-label="${l}"><option value="">— ${l} —</option>${ps.map(p=>`<option value="${esc(p.id)}"${m&&p.id===m.id?' selected':''}>${esc(p.name)}${(p.pos||[]).length?' ('+esc(p.pos.join('/'))+')':''}${fieldIds.includes(p.id)&&!(m&&p.id===m.id)?' · on field':''}</option>`).join('')}</select></td><td>${m?`<span class="lvl">L${m.level||'?'}</span>${(m.pos||[]).length&&!fits(m,k)?' <span class="small" style="color:var(--warn)">out of position</span>':''}`:''}</td></tr>`}).join('')}
+    </tbody></table></div>`;
+  }
+  const bo=battingOrder(lu);
+  const order=`<div style="display:grid;gap:8px;align-content:start"><h3>Team ${TEAM[t]} batting order</h3>${bo.length?`<div class="list order">${bo.map((id,i)=>{const m=mem(id);const k=Object.keys(lu.slots).find(x=>lu.slots[x]===id);return `<div class="li"><span class="n">${i+1}</span><span><b>${esc(m.name)}</b> <span class="muted small">${k}</span></span><div class="ctrl"><button class="ghost" data-act="boUp" data-i="${i}" aria-label="Bat earlier"${i?'':' disabled'}>↑</button><button class="ghost" data-act="boDown" data-i="${i}" aria-label="Bat later"${i<bo.length-1?'':' disabled'}>↓</button></div></div>`}).join('')}</div>`:'<p class="small muted" style="margin:0">Players appear here as you place them on the field.</p>'}
+    <div class="row"><button data-act="luAuto">Auto-fill empty positions</button><button data-act="luClear">${S.confirm==='luclear'?'Tap again to clear':'Clear field'}</button></div></div>`;
+  return `<section class="card">${head}<div class="cols"><div class="stack">${main}</div>${order}</div></section>`;
+}
+function lineupLines(d){const out=[];if(!hasGame(d)||!d.lineups)return out;
+  for(let t=0;t<d.numTeams;t++){const lu=d.lineups[String(t)];if(!lu||!onField(lu).length)continue;
+    out.push('',`Team ${TEAM[t]} lineup`);battingOrder(lu).forEach((id,i)=>{const k=Object.keys(lu.slots).find(x=>lu.slots[x]===id);out.push(`${i+1}. ${mem(id).name} (${k})`)})}
+  return out}
+function copyText(txt,msg){const done=()=>toast(msg);
+  const fallback=()=>{const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}ta.remove();ok?done():toast("Couldn't copy here. Try from a browser.")};
+  try{navigator.clipboard.writeText(txt).then(done,fallback)}catch(e){fallback()}}
+const A_LU=Object.assign({},{
+  luTeam({n}){S.luTeam=+n;S.sel=null},
+  luView({v}){S.luView=v;S.sel=null},
+  luTap({id}){S.sel=S.sel&&S.sel.id===id?null:{id,from:'bench'}},
+  luSlot({slot}){const lu=LU();if(S.sel){if(S.sel.from===slot){S.sel=null;return}assign(S.sel.id,S.sel.from,slot);S.sel=null}else if(lu.slots[slot])S.sel={id:lu.slots[slot],from:slot}},
+  luBench(){if(S.sel&&S.sel.from!=='bench'){assign(S.sel.id,S.sel.from,'bench');S.sel=null}},
+  luAuto(){autoFill(LU());markDirty()},
+  luClear(){if(!armConfirm('luclear'))return;const lu=LU();lu.slots={};lu.order=[];markDirty();S.sel=null},
+  boUp({i}){i=+i;const lu=LU(),o=battingOrder(lu);if(i>0){[o[i-1],o[i]]=[o[i],o[i-1]];lu.order=o;markDirty()}},
+  boDown({i}){i=+i;const lu=LU(),o=battingOrder(lu);if(i<o.length-1){[o[i+1],o[i]]=[o[i],o[i+1]];lu.order=o;markDirty()}},
+  addGame(){const g=S.drills.filter(x=>x.category==='game').sort(byOrder)[0];if(!g)return;const b=S.draft.blocks;const nb=drillBlock(g);const i=b.findIndex(y=>y.category==='fun'||y.category==='admin');if(i>=0)b.splice(i,0,nb);else b.push(nb);S.blocksEdited=true;markDirty()},
+});
+
+/* drag and drop: mouse drags straight away, touch after a short hold so the page can still scroll */
+function dropTarget(x,y){const el=document.elementFromPoint(x,y);if(!el)return null;const sl=el.closest('[data-slot]');if(sl)return sl;return el.closest('[data-bench]')}
+function clearDrop(){document.querySelectorAll('.drop').forEach(e=>e.classList.remove('drop'))}
+document.addEventListener('pointerdown',e=>{
+  const el=e.target.closest('[data-drag]');if(!el||S.view!=='plan'||e.button>0)return;
+  const d={id:el.dataset.drag,from:el.dataset.from,x:e.clientX,y:e.clientY,touch:e.pointerType==='touch',armed:false,ghost:null,pid:e.pointerId};
+  if(d.touch)d.timer=setTimeout(()=>{d.armed=true;if(navigator.vibrate)try{navigator.vibrate(15)}catch(_){}startGhost(d,d.x,d.y)},280);
+  S.drag=d;
+});
+function startGhost(d,x,y){const m=mem(d.id);const g=document.createElement('div');g.className='dragghost';g.textContent=m?shortName(m.name):'';document.body.appendChild(g);d.ghost=g;moveGhost(d,x,y)}
+function moveGhost(d,x,y){d.ghost.style.left=x+'px';d.ghost.style.top=y+'px';clearDrop();const t=dropTarget(x,y);if(t)t.classList.add('drop')}
+document.addEventListener('pointermove',e=>{const d=S.drag;if(!d||e.pointerId!==d.pid)return;
+  const moved=Math.hypot(e.clientX-d.x,e.clientY-d.y);
+  if(!d.armed){if(d.touch){if(moved>8){clearTimeout(d.timer);S.drag=null}return}if(moved<5)return;d.armed=true;startGhost(d,e.clientX,e.clientY);return}
+  if(d.ghost)moveGhost(d,e.clientX,e.clientY);
+});
+document.addEventListener('touchmove',e=>{if(S.drag&&S.drag.armed)e.preventDefault()},{passive:false});
+document.addEventListener('contextmenu',e=>{if(S.drag&&S.drag.armed)e.preventDefault()});
+function endDrag(e,cancel){const d=S.drag;if(!d||e.pointerId!==d.pid)return;clearTimeout(d.timer);S.drag=null;
+  if(!d.armed)return;
+  if(d.ghost)d.ghost.remove();
+  const t=cancel?null:dropTarget(e.clientX,e.clientY);clearDrop();S.suppressClick=true;setTimeout(()=>S.suppressClick=false,60);
+  if(!t)return;const to=t.dataset.slot||'bench';if(to===d.from)return;
+  assign(d.id,d.from,to);S.sel=null;render();
+}
+document.addEventListener('pointerup',e=>endDrag(e,false));
+document.addEventListener('pointercancel',e=>endDrag(e,true));
+
+/* ---------- data ---------- */
+let toastT;
+function toast(msg){const el=$('#toast');el.textContent=msg;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,2600)}
+async function write(fn,ok){
+  if(!S.db){toast('Sign in to save changes.');return false}
+  try{await fn();if(ok)toast(ok);return true}
+  catch(e){if(e&&(e.code==='permission-denied'||e.code==='invalid_argument')){S.readOnly=true;toast("This change wasn't saved. You may only have view access.")}
+    else if(e&&e.code==='quota_exceeded')toast('Storage is full. Delete some old plans and try again.');
+    else toast("Couldn't save just now. Try again in a moment.");render();return false}
+}
+function markDirty(){S.dirty=true}
+let confirmT;
+function armConfirm(key){if(S.confirm===key){S.confirm=null;return true}S.confirm=key;clearTimeout(confirmT);confirmT=setTimeout(()=>{S.confirm=null;render()},3500);render();return false}
+
+function norm(s){return String(s).toLowerCase().replace(/^[\s\d.)\-•*·]+/,'').replace(/[^\p{L}\p{N}\s'-]/gu,'').replace(/\s+/g,' ').trim()}
+function matchNames(text){
+  const lines=text.split(/[\n,]+/).map(norm).filter(Boolean);
+  const ms=S.members.map(m=>({m,n:norm(m.name)}));
+  const hit=[],miss=[];
+  for(const l of lines){
+    let c=ms.filter(x=>x.n===l);
+    if(c.length!==1)c=ms.filter(x=>x.n.split(' ')[0]===l.split(' ')[0]);
+    if(c.length!==1)c=ms.filter(x=>x.n.includes(l)||l.includes(x.n));
+    if(c.length===1)hit.push(c[0].m.id);else miss.push(l);
+  }
+  return {hit,miss};
+}
+
+function planText(){
+  const d=S.draft;const ppl=present(d);
+  const out=[`Training · ${pretty(d.date)} · ${venueLabel(d.venue)} · ${fmt(toMin(d.start))}–${fmt(toMin(d.end))}`];
+  if(ppl.length){out.push('');for(let t=0;t<d.numTeams;t++){const r=teamRoster(d,t);if(r.length)out.push(`Team ${TEAM[t]}: ${r.map(m=>m.name).join(', ')}`)}}
+  out.push('');let t=toMin(d.start);
+  for(const b of d.blocks){const s=t;t+=blockMin(b);
+    if(b.kind!=='rotation'){out.push(`${fmt(s)}–${fmt(t)} ${b.name}`);continue}
+    out.push(`${fmt(s)}–${fmt(t)} ${b.name}`);
+    b.stations.forEach((_,r)=>out.push(`  ${fmt(s+r*b.per)} ` + Array.from({length:d.numTeams},(_,k)=>`${TEAM[k]}: ${b.stations[(k+r)%b.stations.length]}`).join(' | ')));
+  }
+  out.push(...lineupLines(S.draft));
+  return out.join('\n');
+}
+
+const A={
+  toggle({id}){const d=S.draft;const i=d.attendees.indexOf(id);if(i>=0){d.attendees.splice(i,1);delete d.teams[id]}else{d.attendees.push(id);d.teams[id]=smallestTeam(d)}markDirty()},
+  all(){const d=S.draft;S.members.filter(m=>m.active!==false).forEach(m=>{if(!d.attendees.includes(m.id))d.attendees.push(m.id)});balanceTeams(d);markDirty()},
+  none(){S.draft.attendees=[];S.draft.teams={};markDirty()},
+  paste(){const {hit,miss}=matchNames(S.paste);const d=S.draft;let added=0;hit.forEach(id=>{if(!d.attendees.includes(id)){d.attendees.push(id);d.teams[id]=smallestTeam(d);added++}});
+    S.pasteMsg=`Marked ${added} present.`+(miss.length?` Not found: ${miss.join(', ')}.`:'');if(added)markDirty()},
+  balance(){balanceTeams(S.draft);markDirty()},
+  move({id}){const d=S.draft;d.teams[id]=((teamOf(d,id)??-1)+1)%d.numTeams;markDirty()},
+  teams({n}){const d=S.draft;d.numTeams=+n;balanceTeams(d);if(!S.blocksEdited)d.blocks=autoBlocks(d);markDirty()},
+  up({i}){i=+i;const b=S.draft.blocks;if(i>0){[b[i-1],b[i]]=[b[i],b[i-1]];S.blocksEdited=true;markDirty()}},
+  down({i}){i=+i;const b=S.draft.blocks;if(i<b.length-1){[b[i+1],b[i]]=[b[i],b[i+1]];S.blocksEdited=true;markDirty()}},
+  del({i}){S.draft.blocks.splice(+i,1);S.blocksEdited=true;markDirty()},
+  add(){const id=$('#add-drill').value;const x=S.drills.find(x=>x.id===id);if(!x)return toast('Pick a drill to add first.');
+    const b=S.draft.blocks;const tailIdx=b.findIndex(y=>y.category==='admin');const nb=drillBlock(x);if(tailIdx>=0)b.splice(tailIdx,0,nb);else b.push(nb);S.blocksEdited=true;markDirty()},
+  addrot(){const b=S.draft.blocks;const nb={id:rid(),kind:'rotation',name:'Station rotation',per:20,stations:[]};const tailIdx=b.findIndex(y=>y.category==='admin');if(tailIdx>=0)b.splice(tailIdx,0,nb);else b.push(nb);S.blocksEdited=true;markDirty()},
+  stdel({i,j}){S.draft.blocks[+i].stations.splice(+j,1);S.blocksEdited=true;markDirty()},
+  rebuild(){if(!armConfirm('rebuild'))return;S.draft.blocks=autoBlocks(S.draft);S.blocksEdited=false;markDirty()},
+  open({date}){S.draft=loadDraft(date)},
+  async save(){const d=clone(S.draft);d.updatedAt=new Date().toISOString();if(await write(()=>S.db.doc('sessions/'+d.date).set(d),'Plan saved')){S.dirty=false;S.blocksEdited=true;render()}},
+  async delsess(){if(!armConfirm('delsess'))return;const date=S.draft.date;if(await write(()=>S.db.doc('sessions/'+date).delete(),'Plan deleted')){S.dirty=true;render()}},
+  copy(){const txt=planText();const done=()=>toast('Plan copied. Paste it into the group chat.');
+    const fallback=()=>{S.paste=S.paste;const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}ta.remove();ok?done():toast("Couldn't copy here. Try from a browser.")};
+    try{navigator.clipboard.writeText(txt).then(done,fallback)}catch(e){fallback()}},
+  mlevel({n}){S.mf.level=+n},
+  mgender({g}){S.mf.gender=S.mf.gender===g?'':g},
+  mpos({p}){const a=S.mf.pos;const i=a.indexOf(p);i>=0?a.splice(i,1):a.push(p)},
+  medit({id}){const m=S.members.find(m=>m.id===id);if(m){S.mf={id:m.id,name:m.name,level:m.level||3,pos:[...(m.pos||[])],gender:m.gender||'',pin:(S.pins[m.id]||'')};scrollTo({top:0})}},
+  mcancel(){S.mf=newMemberForm()},
+  async msave(){const f=S.mf;const name=f.name.trim();if(!name)return toast('Enter a name first.');
+    if(S.members.some(m=>m.id!==f.id&&norm(m.name)===norm(name)))return toast(`${name} is already on the roster.`);
+    const ref=f.id?S.db.doc('members/'+f.id):S.db.collection('members').doc();
+    const old=f.id?S.members.find(m=>m.id===f.id):null;
+    const pin=String(f.pin||'').trim();if(pin&&!/^\d{4}$/.test(pin))return toast('The PIN needs to be 4 digits.');
+    if(await write(async()=>{await ref.set({name,level:f.level,pos:f.pos,gender:f.gender,active:old?.active??true});await S.db.doc('roster/'+ref.id).set({name});if(pin&&pin!==S.pins[ref.id])await S.db.doc('memberPins/'+ref.id).set({pin})},f.id?'Member updated':`${name} added`)){S.mf=newMemberForm();render()}},
+  mpin(){S.mf.pin=newPin()},
+  async pinsAll(){const miss=S.members.filter(m=>!S.pins[m.id]);for(const m of miss){if(!await write(()=>S.db.doc('memberPins/'+m.id).set({pin:newPin()})))return}toast(`Gave ${miss.length} members a PIN`)},
+  pinsCopy(){const t=[...S.members].sort((a,b)=>a.name.localeCompare(b.name)).map(m=>`${m.name}: ${S.pins[m.id]||'no PIN yet'}`).join('\n');copyText(t,'PIN list copied. Send each member their own PIN privately.')},
+  rsvpYes(){const d=S.draft,rv=S.rsvps[d.date]||{};S.members.forEach(m=>{if(rv[m.id]===true&&!d.attendees.includes(m.id)){d.attendees.push(m.id);d.teams[m.id]=smallestTeam(d)}});markDirty()},
+  async signin(){try{await signInGoogle();S.user=auth.currentUser;start()}catch(e){toast("Sign-in didn't finish. Try again.")}},
+  async signout(){await logOut();location.reload()},
+  async mdel({id}){if(!armConfirm('m'+id))return;await write(async()=>{await S.db.doc('members/'+id).delete();await S.db.doc('roster/'+id).delete();await S.db.doc('memberPins/'+id).delete()},'Member removed');if(S.mf.id===id)S.mf=newMemberForm();render()},
+  dvenue({v}){const a=S.df.venues;const i=a.indexOf(v);i>=0?a.splice(i,1):a.push(v)},
+  dedit({id}){const x=S.drills.find(x=>x.id===id);if(x){S.df={id:x.id,name:x.name,minutes:x.minutes,category:x.category,venues:[...(x.venues||[])],station:!!x.station,auto:!!x.auto,notes:x.notes||'',order:x.order};scrollTo({top:0})}},
+  dcancel(){S.df=newDrillForm()},
+  async dsave(){const f=S.df;const name=f.name.trim();if(!name)return toast('Enter a drill name first.');if(!f.venues.length)return toast('Pick at least one venue.');
+    const ref=f.id?S.db.doc('drills/'+f.id):S.db.collection('drills').doc();
+    const order=f.id?(f.order??0):Math.max(0,...S.drills.map(x=>x.order||0))+1;
+    if(await write(()=>ref.set({name,minutes:Math.max(0,+f.minutes||0),category:f.category,venues:f.venues,station:f.station,auto:f.auto,notes:f.notes.trim(),order}),f.id?'Drill updated':`${name} added`)){S.df=newDrillForm();render()}},
+  async ddel({id}){if(!armConfirm('d'+id))return;await write(()=>S.db.doc('drills/'+id).delete(),'Drill removed');if(S.df.id===id)S.df=newDrillForm();render()},
+};
+
+Object.assign(A,A_LU);
+document.addEventListener('click',e=>{
+  if(S.suppressClick){S.suppressClick=false;return}
+  const el=e.target.closest('[data-act]');if(!el||el.disabled||el.tagName==='SELECT')return;
+  const fn=A[el.dataset.act];if(!fn)return;
+  const r=fn(el.dataset,el);if(!(r instanceof Promise))render();
+});
+document.addEventListener('input',e=>{
+  const k=e.target.dataset.input;if(!k)return;
+  if(k==='paste')S.paste=e.target.value;
+  else{const [o,f]=k.split('.');S[o][f]=e.target.value}
+});
+document.addEventListener('change',e=>{
+  const el=e.target,d=S.draft;
+  if(el.dataset.fb){d[el.dataset.fb]=el.checked;if(el.dataset.fb==='published'&&!el.checked)d.teamsVisible=false;markDirty();render();return}
+  if(el.id==='import-file'&&el.files[0]){importBackup(el.files[0]);return}
+  if(el.dataset.f==='evenGender'){d.evenGender=el.checked;balanceTeams(d);markDirty();render();return}
+  if(el.dataset.f){const k=el.dataset.f,v=el.value;if(!v)return;
+    if(k==='date'){S.draft=loadDraft(v)}
+    else{d[k]=v;if(k==='venue'){const want=venueKind(v)==='MPSH'?3:2;if(!S.blocksEdited){d.numTeams=want;balanceTeams(d)}}
+      if(!S.blocksEdited)d.blocks=autoBlocks(d);markDirty()}
+    render();return}
+  if(el.dataset.bf){const b=d.blocks[+el.dataset.i];b[el.dataset.bf]=Math.max(0,Math.round(+el.value||0));S.blocksEdited=true;markDirty();render();return}
+  if(el.dataset.actChange==='stadd'){if(el.value){d.blocks[+el.dataset.i].stations.push(el.value);S.blocksEdited=true;markDirty()}render();return}
+  if(el.dataset.lf){const lu=LU(),k=el.dataset.lf;lu[k]=el.checked;if(k==='useSF'&&!el.checked)delete lu.slots.R;markDirty();render();return}
+  if(el.dataset.lslot){const k=el.dataset.lslot,id=el.value;const sl=LU().slots;const cur=Object.keys(sl).find(x=>sl[x]===id);if(id){assign(id,cur||'bench',k)}else{delete sl[k];markDirty()}render();return}
+  if(el.dataset.dchange){const k=el.dataset.dchange;S.df[k]=el.type==='checkbox'?el.checked:el.value;return}
+});
+
+function route(){const h=location.hash.slice(1);S.view=['plan','members','drills'].includes(h)?h:'plan';S.sel=null;render()}
+window.addEventListener('hashchange',route);
+
+function afterData(){
+  if(!(S.ready.m&&S.ready.d&&S.ready.s))return;
+  if(!S.draft)S.draft=loadDraft(nextTraining());
+  else if(!S.dirty&&S.sessions[S.draft.date])S.draft=loadDraft(S.draft.date);
+  else if(!S.dirty&&!S.blocksEdited&&!S.sessions[S.draft.date])S.draft.blocks=autoBlocks(S.draft);
+  // drop attendees whose member was deleted
+  S.draft.attendees=S.draft.attendees.filter(id=>S.members.some(m=>m.id===id));
+  S.status='ok';render();
+}
+
+async function importBackup(file){
+  let data;try{data=JSON.parse(await file.text())}catch(e){return toast("That file isn't a planner backup.")}
+  const ms=data.members||[],ds=data.drills||[];let n=0;
+  for(const m of ms){const {id,...rest}=m;if(!await write(async()=>{await S.db.doc('members/'+id).set(rest);await S.db.doc('roster/'+id).set({name:rest.name})}))return;n++}
+  for(const x of ds){const {id,...rest}=x;if(!await write(()=>S.db.doc('drills/'+id).set(rest)))return}
+  toast(`Imported ${n} members and ${ds.length} drills`);
+}
+let rosterSynced=false;
+async function syncRoster(){
+  // members can only read names, so keep roster/{id} in step with members/{id}
+  if(rosterSynced||!S.ready.r)return;rosterSynced=true;
+  for(const m of S.members){if(S.roster[m.id]!==m.name)await S.db.doc('roster/'+m.id).set({name:m.name}).catch(()=>{})}
+}
+function start(){
+  S.status='loading';render();S.db=db;
+  const fail=e=>{if(e&&e.code==='permission-denied'){S.status='denied';render()}};
+  db.collection('members').onSnapshot(s=>{S.members=s.docs.map(x=>({id:x.id,...x.data()}));S.ready.m=1;afterData();syncRoster()},fail);
+  db.collection('drills').onSnapshot(s=>{S.drills=s.docs.map(x=>({id:x.id,...x.data()}));S.ready.d=1;afterData()},fail);
+  db.collection('sessions').onSnapshot(s=>{S.sessions=Object.fromEntries(s.docs.map(x=>[x.id,x.data()]));S.ready.s=1;afterData()},fail);
+  db.collection('memberPins').onSnapshot(s=>{S.pins=Object.fromEntries(s.docs.map(x=>[x.id,x.data().pin]));if(S.status==='ok')render()},fail);
+  db.collection('roster').onSnapshot(s=>{S.roster=Object.fromEntries(s.docs.map(x=>[x.id,x.data().name]));S.ready.r=1;syncRoster()},fail);
+  db.collection('rsvps').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]=v.going});S.rsvps=o;if(S.status==='ok')render()},fail);
+}
+(async()=>{
+  route();
+  if(!configured){S.status='noconfig';render();return}
+  S.user=await currentUser();
+  if(!S.user||S.user.isAnonymous){S.status='signin';render();return}
+  start();
+})();
+</script>
+</body>
+</html>
