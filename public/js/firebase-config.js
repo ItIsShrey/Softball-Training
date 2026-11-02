@@ -8,3 +8,10 @@ export const firebaseConfig = {
   messagingSenderId: "227635910686",
   appId: "1:227635910686:web:adf4be5121303a4c28360f",
 };
+
+// Telegram login. Fill both after creating the bot and deploying the Worker (README, "Telegram login").
+// Leave them empty to use name + PIN only.
+export const telegram = {
+  bot: '',      // bot username without @, e.g. 'smusoftball_bot'
+  authUrl: '',  // Worker URL, e.g. 'https://softball-telegram-auth.<you>.workers.dev/auth/telegram'
+};

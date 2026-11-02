@@ -1,0 +1,12 @@
+name = "softball-telegram-auth"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+[vars]
+# The site allowed to call this Worker.
+ALLOWED_ORIGIN = "https://softball-training-a2e32.web.app"
+
+# Secrets (set with `npx wrangler secret put NAME`, never commit them):
+#   BOT_TOKEN              token from @BotFather
+#   FIREBASE_CLIENT_EMAIL  client_email from the Firebase service account JSON
+#   FIREBASE_PRIVATE_KEY   private_key from the same JSON

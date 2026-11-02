@@ -24,7 +24,8 @@
 <div class="toast" id="toast" hidden></div>
 
 <script type="module">
-import { db, auth, configured, currentUser, signInGoogle, logOut } from './js/store.js';
+import { db, auth, configured, currentUser, signInGoogle, logOut, telegramEnabled, signInTelegram, mountTelegramButton } from './js/store.js';
+async function onTelegram(user){try{await signInTelegram(user);S.user=auth.currentUser;start()}catch(e){toast("Telegram login didn't go through. Try again.")}}
 const VENUES=[{id:'MPSH',label:'MPSH (hall)',kind:'MPSH',from:'15:30',to:'18:00'},{id:'Kallang',label:'Kallang field',kind:'Field',from:'15:30',to:'18:00'},{id:'Jurong',label:'Jurong field',kind:'Field',from:'15:30',to:'18:00'}];
 const venueOf=id=>VENUES.find(v=>v.id===id)||VENUES[0];
 /* problems with the venue's booked slot, as sentences */
@@ -57,7 +58,7 @@ const byOrder=(a,b)=>(a.order??0)-(b.order??0)||String(a.name).localeCompare(b.n
 
 function nextTraining(){const d=new Date();for(let i=0;i<7;i++){const x=new Date(d);x.setDate(d.getDate()+i);if(x.getDay()===3||x.getDay()===5)return iso(x)}return iso(d)}
 
-const S={db:null,user:null,pins:{},roster:{},rsvps:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
+const S={db:null,user:null,pins:{},links:{},roster:{},rsvps:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
   members:[],drills:[],sessions:{},view:'plan',draft:null,dirty:false,blocksEdited:false,
   mf:null,df:null,paste:'',pasteMsg:'',confirm:null};
 
@@ -138,8 +139,8 @@ function render(){
   const so=$('#signout');if(so)so.hidden=!S.user;
   if(S.status==='loading')return;
   if(S.status==='noconfig'){app.innerHTML=`<section class="card"><h2>Connect Firebase</h2><p class="muted">Paste your Firebase web config into <code>js/firebase-config.js</code> and reload. The README has the steps.</p></section>`;return}
-  if(S.status==='signin'){app.innerHTML=`<section class="card" style="max-width:460px"><h2>Coach sign-in</h2><p class="muted">Sign in with the Google account your exco list uses. Members use the <a href="index.html">member page</a> instead.</p><div class="row"><button class="primary" data-act="signin">Sign in with Google</button></div></section>`;return}
-  if(S.status==='denied'){app.innerHTML=`<section class="card" style="max-width:520px"><h2>Not on the exco list</h2><p class="muted">${esc(S.user&&S.user.email||'This account')} can't open the coach view. Ask the owner to add your email to the exco list in Firebase, then reload.</p><div class="row"><button data-act="signout">Use another account</button></div></section>`;return}
+  if(S.status==='signin'){app.innerHTML=`<section class="card" style="max-width:460px"><h2>Coach sign-in</h2><p class="muted">Excos sign in here. Members use the <a href="index.html">member page</a> instead.</p>${telegramEnabled?'<div id="tg-login" style="min-height:48px"></div><p class="small muted" style="margin:0">or</p>':''}<div class="row"><button${telegramEnabled?'':' class="primary"'} data-act="signin">Sign in with Google</button></div></section>`;if(telegramEnabled)mountTelegramButton(document.getElementById('tg-login'),onTelegram);return}
+  if(S.status==='denied'){app.innerHTML=`<section class="card" style="max-width:520px"><h2>Not on the exco list</h2><p class="muted">${esc(S.user&&(S.user.email||'This Telegram account'))} can't open the coach view. Ask the owner to add a document to the <code>admins</code> collection in Firebase with this ID, then reload:</p><p><code style="font-size:15px">${esc(S.user&&(S.user.email||S.user.uid))}</code></p><div class="row"><button data-act="signout">Use another account</button></div></section>`;return}
   const a=document.activeElement,fid=a&&a.id;let sel=null;
   try{if(a&&'selectionStart' in a)sel=[a.selectionStart,a.selectionEnd]}catch(e){}
   const banner=S.readOnly?`<div class="banner">Your changes aren't being saved. Check that your email is on the exco list.</div>`:'';
@@ -270,7 +271,7 @@ function membersHTML(){
     <label class="f">Member PIN<div class="row" style="flex-wrap:nowrap"><input id="mf-pin" data-input="mf.pin" value="${esc(f.pin)}" inputmode="numeric" maxlength="4" placeholder="4 digits" style="max-width:120px"><button data-act="mpin">New PIN</button></div><span class="small muted" style="font-weight:400">They use this with their name to reply to trainings.</span></label>
     <div class="row"><button class="primary" data-act="msave"${S.readOnly?' disabled':''}>${f.id?'Save changes':'Add member'}</button>${f.id?'<button data-act="mcancel">Cancel</button>':''}</div>
   </section>`;
-  const list=`<section class="card"><h2>Roster</h2>${ms.length?`<div class="list">${ms.map(m=>`<div class="li"><div><div class="nm">${esc(m.name)}</div><div class="small muted">${S.pins[m.id]?'':'<span class="pill warn" style="padding:0 6px;font-size:11px">no PIN</span> '}${dots(m.level||0)} ${esc(LEVELS[m.level]||'')}${m.gender?' · '+esc((GENDER.find(x=>x[0]===m.gender)||[,''])[1]):''}${(m.pos||[]).length?' · '+esc(m.pos.map(p=>(POS.find(x=>x[0]===p)||[,p])[1]).join(', ')):''}</div></div>
+  const list=`<section class="card"><h2>Roster</h2>${ms.length?`<div class="list">${ms.map(m=>`<div class="li"><div><div class="nm">${esc(m.name)}</div><div class="small muted">${S.links[m.id]?'<span class="pill good" style="padding:0 6px;font-size:11px">Telegram</span> ':''}${S.pins[m.id]?'':'<span class="pill warn" style="padding:0 6px;font-size:11px">no PIN</span> '}${dots(m.level||0)} ${esc(LEVELS[m.level]||'')}${m.gender?' · '+esc((GENDER.find(x=>x[0]===m.gender)||[,''])[1]):''}${(m.pos||[]).length?' · '+esc(m.pos.map(p=>(POS.find(x=>x[0]===p)||[,p])[1]).join(', ')):''}</div></div>
       <div class="row"><button class="ghost" data-act="medit" data-id="${esc(m.id)}">Edit</button><button class="ghost danger" data-act="mdel" data-id="${esc(m.id)}">${S.confirm==='m'+m.id?'Tap again':'Delete'}</button></div></div>`).join('')}</div>`
     :'<div class="empty">Your roster is empty. Add each player with a level from 1 (new) to 5 (standout) so teams can be balanced.</div>'}</section>`;
   const nopin=ms.filter(m=>!S.pins[m.id]).length;
@@ -575,6 +576,7 @@ function start(){
   db.collection('sessions').onSnapshot(s=>{S.sessions=Object.fromEntries(s.docs.map(x=>[x.id,x.data()]));S.ready.s=1;afterData()},fail);
   db.collection('memberPins').onSnapshot(s=>{S.pins=Object.fromEntries(s.docs.map(x=>[x.id,x.data().pin]));if(S.status==='ok')render()},fail);
   db.collection('roster').onSnapshot(s=>{S.roster=Object.fromEntries(s.docs.map(x=>[x.id,x.data().name]));S.ready.r=1;syncRoster()},fail);
+  db.collection('claims').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();if(x.id.startsWith('tg:'))o[v.memberId]=x.id});S.links=o;if(S.status==='ok')render()},()=>{});
   db.collection('rsvps').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]=v.going});S.rsvps=o;if(S.status==='ok')render()},fail);
 }
 (async()=>{

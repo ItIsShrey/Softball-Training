@@ -41,7 +41,7 @@ input.big{font-size:18px;padding:12px 14px}
 <div class="toast" id="toast" hidden></div>
 
 <script type="module">
-import { db, auth, configured, currentUser, signInGuest } from './js/store.js';
+import { db, auth, configured, currentUser, signInGuest, logOut, telegramEnabled, signInTelegram, mountTelegramButton } from './js/store.js';
 
 const VENUES={MPSH:'MPSH (hall)',Kallang:'Kallang field',Jurong:'Jurong field'};
 const TEAM=['A','B','C'];
@@ -67,18 +67,31 @@ function render(){
   if(M.status==='noconfig')app.innerHTML=`<section class="card"><h2>Not set up yet</h2><p class="muted">The club hasn't connected this page to its database yet.</p></section>`;
   else if(M.status==='loading')return;
   else if(M.status==='error')app.innerHTML=`<section class="card"><h2>Can't load trainings</h2><p class="muted">Check your connection and reload the page.</p></section>`;
+  else if(M.status==='tglogin'){app.innerHTML=tgLoginHTML();mountTelegramButton(document.getElementById('tg-login'),onTelegram)}
   else if(M.status==='login')app.innerHTML=loginHTML();
   else app.innerHTML=homeHTML();
   if(fid){const el=document.getElementById(fid);if(el&&el!==document.activeElement)el.focus({preventScroll:true})}
 }
 
+function tgLoginHTML(){
+  return `<section class="card"><h2>Log in</h2>
+    <p class="muted" style="margin:0">Use your Telegram account. You'll confirm in the Telegram app.</p>
+    <div id="tg-login" style="min-height:48px"></div>
+    ${M.err?`<div class="banner bad">${esc(M.err)}</div>`:''}</section>`;
+}
+async function onTelegram(user){
+  M.status='loading';render();
+  try{const u=await signInTelegram(user);await afterAuth(u)}
+  catch(e){M.err="Telegram login didn't go through. Try again.";M.status='tglogin'}
+  render();
+}
 function loginHTML(){
   const names=Object.entries(M.roster).sort((a,b)=>a[1].localeCompare(b[1]));
   const q=norm(M.q);
   const hits=q?names.filter(([,n])=>norm(n).includes(q)).slice(0,8):[];
   const picked=M.pick&&M.roster[M.pick];
   return `<section class="card"><h2>Who are you?</h2>
-    <p class="muted" style="margin:0">Find your name, then enter the 4-digit PIN your exco sent you. You only need to do this once on this phone.</p>
+    <p class="muted" style="margin:0">${telegramEnabled?'One last step: find your name and enter the 4-digit PIN your exco sent you. This links your Telegram, so you only do it once.':'Find your name, then enter the 4-digit PIN your exco sent you. You only need to do this once on this phone.'}</p>
     ${picked?`<div class="who"><button aria-pressed="true" data-act="unpick">${esc(picked)} <span class="small" style="float:right;opacity:.8">Change</span></button></div>
       <label class="f">PIN<input class="big pinbox" id="pin" data-input="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="4" value="${esc(M.pin)}"></label>
       ${M.err?`<div class="banner bad">${esc(M.err)}</div>`:''}
@@ -147,7 +160,7 @@ const A={
     catch(e){M.err=e&&e.code==='permission-denied'?"That PIN doesn't match. Check the message from your exco.":"Couldn't check your PIN. Try again."}
     M.busy=false;render();
   },
-  async switch(){try{await db.doc('claims/'+M.uid).delete()}catch(e){}M.me=null;M.pick=null;M.pin='';M.status='login';render()},
+  async switch(){try{await db.doc('claims/'+M.uid).delete()}catch(e){}M.me=null;M.pick=null;M.pin='';if(telegramEnabled){await logOut();M.status='tglogin'}else M.status='login';render()},
   async rsvp({date,v}){
     const going=v==='1';if(myRsvp(date)===going)return;
     (M.rsvps[date]=M.rsvps[date]||{})[M.me]=going;render();
@@ -160,6 +173,13 @@ document.addEventListener('input',e=>{const k=e.target.dataset.input;if(!k)retur
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='q'){const first=document.querySelector('.who button');if(first)first.click()}});
 document.addEventListener('toggle',e=>{const d=e.target.dataset&&e.target.dataset.open;if(d)M.open[d]=e.target.open},true);
 
+let rosterStarted=false;
+async function afterAuth(u){
+  M.uid=u.uid;
+  if(!rosterStarted){rosterStarted=true;db.collection('roster').onSnapshot(s=>{M.roster=Object.fromEntries(s.docs.map(x=>[x.id,x.data().name]));if(M.status!=='loading')render()},()=>{M.status='error';render()})}
+  const c=await db.doc('claims/'+M.uid).get();
+  if(c.exists&&c.data().memberId){M.me=c.data().memberId;M.status='home';startData()}else M.status='login';
+}
 let dataStarted=false;
 function startData(){
   if(dataStarted)return;dataStarted=true;
@@ -173,11 +193,9 @@ function startData(){
   if(!configured){M.status='noconfig';render();return}
   try{
     let u=await currentUser();
-    if(!u){await signInGuest();u=auth.currentUser}
-    M.uid=u.uid;
-    db.collection('roster').onSnapshot(s=>{M.roster=Object.fromEntries(s.docs.map(x=>[x.id,x.data().name]));if(M.status!=='loading')render()},()=>{M.status='error';render()});
-    const c=await db.doc('claims/'+M.uid).get();
-    if(c.exists&&c.data().memberId){M.me=c.data().memberId;M.status='home';startData()}else M.status='login';
+    if(telegramEnabled){if(!u||u.isAnonymous){M.status='tglogin';render();return}}
+    else if(!u){await signInGuest();u=auth.currentUser}
+    await afterAuth(u);
   }catch(e){M.status='error'}
   render();
 })();
