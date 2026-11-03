@@ -42,7 +42,7 @@ input.big{font-size:18px;padding:12px 14px}
 <div class="toast" id="toast" hidden></div>
 
 <script type="module">
-import { db, auth, configured, currentUser, signInGuest, logOut, telegramEnabled, signInTelegram, mountTelegramButton } from './js/store.js';
+import { db, auth, configured, currentUser, signInGuest, logOut, telegramEnabled, signInTelegram, mountTelegramButton, telegramProfile } from './js/store.js';
 
 const VENUES={MPSH:'MPSH (hall)',Kallang:'Kallang field',Jurong:'Jurong field'};
 const TEAM=['A','B','C'];
@@ -59,7 +59,7 @@ const firstName=n=>{n=String(n||'');if(n.includes(','))return n.split(',')[1].tr
 const norm=s=>String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();
 
 const NEXT=new URLSearchParams(location.search).get('next');
-const M={admin:false,showProfile:false,uid:null,me:null,roster:{},sessions:[],rsvps:{},q:'',pick:null,pin:'',err:'',busy:false,open:{}};
+const M={admin:false,showProfile:false,req:null,uid:null,me:null,roster:{},sessions:[],rsvps:{},q:'',pick:null,pin:'',err:'',busy:false,open:{}};
 function copyText(txt){const done=()=>toast('Code copied');
   const fallback=()=>{const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}ta.remove();ok?done():toast("Couldn't copy. Press and hold the code to copy it.")};
   try{navigator.clipboard.writeText(txt).then(done,fallback)}catch(e){fallback()}}
@@ -96,8 +96,20 @@ function loginHTML(){
   const q=norm(M.q);
   const hits=q?names.filter(([,n])=>norm(n).includes(q)).slice(0,8):[];
   const picked=M.pick&&M.roster[M.pick];
+  if(telegramEnabled&&M.req){const n=M.roster[M.req.memberId]||'';
+    return `<section class="card"><h2>Waiting for an exco</h2><p class="muted" style="margin:0">You asked to be linked as <b>${esc(n)}</b>. An exco will confirm it, and this page will update by itself. You only do this once.</p>
+      <div class="row"><button class="ghost" data-act="cancelReq">That's not my name</button></div></section>${profileHTML()}`}
+  if(telegramEnabled)return `<section class="card"><h2>Who are you?</h2>
+    <p class="muted" style="margin:0">One last step: find your name on the team list. An exco will confirm it's you, and you only do this once.</p>
+    ${picked?`<div class="who"><button aria-pressed="true" data-act="unpick">${esc(picked)} <span class="small" style="float:right;opacity:.8">Change</span></button></div>
+      ${M.err?`<div class="banner bad">${esc(M.err)}</div>`:''}
+      <button class="primary" data-act="request" style="padding:12px;font-size:16px"${M.busy?' disabled':''}>${M.busy?'Sending…':"That's me"}</button>`
+    :`<label class="f">Your name<input class="big" id="q" data-input="q" value="${esc(M.q)}" placeholder="Start typing your name" autocomplete="off"></label>
+      <div class="who">${hits.map(([id,n])=>`<button data-act="pick" data-id="${esc(id)}">${esc(n)}</button>`).join('')||(q?'<p class="small muted" style="margin:0">No one by that name. Ask an exco to add you.</p>':'')}</div>`}
+    ${M.admin?'<div class="row"><button class="ghost" data-act="skip">Skip for now</button></div>':''}
+  </section>${profileHTML()}`;
   return `<section class="card"><h2>Who are you?</h2>
-    <p class="muted" style="margin:0">${telegramEnabled?'One last step: find your name and enter the 4-digit PIN your exco sent you. This links your Telegram, so you only do it once.':'Find your name, then enter the 4-digit PIN your exco sent you. You only need to do this once on this phone.'}</p>
+    <p class="muted" style="margin:0">Find your name, then enter the 4-digit PIN your exco sent you. You only need to do this once on this phone.</p>
     ${picked?`<div class="who"><button aria-pressed="true" data-act="unpick">${esc(picked)} <span class="small" style="float:right;opacity:.8">Change</span></button></div>
       <label class="f">PIN<input class="big pinbox" id="pin" data-input="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="4" value="${esc(M.pin)}"></label>
       ${M.err?`<div class="banner bad">${esc(M.err)}</div>`:''}
@@ -174,6 +186,13 @@ const A={
   profile(){M.showProfile=!M.showProfile},
   copyCode(){copyText(M.uid||'')},
   async logout(){await logOut();location.reload()},
+  async request(){
+    M.busy=true;M.err='';render();
+    try{const p=await telegramProfile();await db.doc('linkRequests/'+M.uid).set({memberId:M.pick,tgName:p.name.slice(0,100),tgUsername:p.username,at:new Date().toISOString()})}
+    catch(e){M.err="Couldn't send that. Try again."}
+    M.busy=false;render();
+  },
+  async cancelReq(){try{await db.doc('linkRequests/'+M.uid).delete()}catch(e){}M.req=null;M.pick=null;M.q='';render()},
   async claim(){
     if(!/^\d{4}$/.test(M.pin)){M.err='Enter your 4-digit PIN.';render();return}
     M.busy=true;M.err='';render();
@@ -181,7 +200,7 @@ const A={
     catch(e){M.err=e&&e.code==='permission-denied'?"That PIN doesn't match. Check the message from your exco.":"Couldn't check your PIN. Try again."}
     M.busy=false;render();
   },
-  async switch(){try{await db.doc('claims/'+M.uid).delete()}catch(e){}M.me=null;M.pick=null;M.pin='';if(telegramEnabled){await logOut();M.status='tglogin'}else M.status='login';render()},
+  async switch(){try{await db.doc('claims/'+M.uid).delete()}catch(e){}M.me=null;M.pick=null;M.pin='';if(telegramEnabled){await logOut();location.reload();return}M.status='login';render()},
   async rsvp({date,v}){
     const going=v==='1';if(myRsvp(date)===going)return;
     (M.rsvps[date]=M.rsvps[date]||{})[M.me]=going;render();
@@ -202,6 +221,20 @@ async function afterAuth(u){
   if(M.admin&&NEXT==='coach'){location.replace('coach.html');return}
   const c=await db.doc('claims/'+M.uid).get();
   if(c.exists&&c.data().memberId){M.me=c.data().memberId;M.status='home';startData()}else M.status=M.admin?'home':'login';
+  if(telegramEnabled&&!M.me){await autoLink();if(!M.me)watchLink()}
+}
+// If an exco recorded this login's @username on a member, link straight away.
+async function autoLink(){
+  try{const p=await telegramProfile();const u=p.username.toLowerCase();if(!u)return;
+    const ix=await db.doc('tgIndex/'+u).get();if(!ix.exists)return;const mid=ix.data().memberId;
+    await db.doc('claims/'+M.uid).set({memberId:mid,via:'username'});M.me=mid;M.status='home';startData()}catch(e){}
+}
+// Waits for an exco to approve this login's link request.
+let linkWatched=false;
+function watchLink(){
+  if(linkWatched)return;linkWatched=true;
+  db.doc('linkRequests/'+M.uid).onSnapshot(s=>{M.req=s.exists?s.data():null;if(M.status==='login')render()},()=>{});
+  db.doc('claims/'+M.uid).onSnapshot(s=>{if(s.exists&&s.data().memberId&&!M.me){M.me=s.data().memberId;M.req=null;M.status='home';startData();toast("You're linked. Welcome!");render()}},()=>{});
 }
 let dataStarted=false;
 function startData(){

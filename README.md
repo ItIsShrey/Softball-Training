@@ -23,7 +23,8 @@ No build step. The pages are plain HTML and JavaScript that load the Firebase SD
    ```
    The site is then live at `https://<project-id>.web.app`.
 7. **Import the roster**: open `/coach`, sign in, go to Members, and load the backup file (`members` and `drills` JSON) with **Import roster**.
-8. **Give out PINs**: on Members, press **Give PINs to everyone without one**, then **Copy PIN list**. Send each member only their own PIN.
+8. **Link members** (with Telegram login): add each member's Telegram @username on Members, one at a time or with **Paste a list**. They're linked automatically when they log in. Anyone without a match picks their name and an exco approves them under **New logins**. Without Telegram login, give out PINs instead:
+   **Give out PINs**: on Members, press **Give PINs to everyone without one**, then **Copy PIN list**. Send each member only their own PIN.
 
 ## Telegram login (optional, free, no card)
 
