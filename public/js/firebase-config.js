@@ -13,5 +13,5 @@ export const firebaseConfig = {
 // Leave them empty to use name + PIN only.
 export const telegram = {
   bot: 'smusoftball_bot',  // bot username without @
-  authUrl: '',  // Worker URL, e.g. 'https://softball-telegram-auth.<you>.workers.dev/auth/telegram'
+  authUrl: 'https://softball-telegram-auth.shrey-chauhan.workers.dev/auth/telegram',  // Worker URL, e.g. 'https://softball-telegram-auth.<you>.workers.dev/auth/telegram'
 };
