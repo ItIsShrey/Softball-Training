@@ -42,6 +42,16 @@ export function notifyExcos(date, memberId) {
   if (!telegram.authUrl) return;
   fetch(telegram.authUrl.replace(/\/auth\/telegram$/, '/notify'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, memberId }) }).catch(() => {});
 }
+// Asks the bot to post a published training to the club's Telegram group. Only excos can.
+export async function announceTraining(date) {
+  const idToken = await auth.currentUser.getIdToken();
+  const res = await fetch(telegram.authUrl.replace(/\/auth\/telegram$/, '/announce'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken, date }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || 'announce_failed');
+  return body;
+}
 // Draws Telegram's official login button into el; onUser gets the signed login data.
 export function mountTelegramButton(el, onUser) {
   if (!el || el.dataset.mounted) return;

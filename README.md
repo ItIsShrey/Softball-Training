@@ -54,6 +54,10 @@ To find a group's ID, open the group in Telegram Web (web.telegram.org/a): the a
 
 Set `EXCO_CHAT_ID` in `worker/wrangler.toml` to the excos' Telegram chat ID and add the bot to that chat, then `npx wrangler deploy`. When a member changes their reply in the 6 hours before a training (coming late, leaving early, or a yes turned into a no), the bot posts it there with their reason. The coach view also shows these under **Last-minute changes** on the calendar.
 
+### Posting trainings to the group
+
+In the coach view, a training that's saved with "Members can see this training" ticked has a **Post to the Telegram group** button. The bot posts the date, time and venue with a "Reply in the app" button. It posts to `ANNOUNCE_CHAT_ID`, or to `GROUP_CHAT_ID` when that's empty, so add the bot to that chat. Only excos can post: the Worker checks the Firebase login and the `admins` list.
+
 How it works for people:
 - **Members** tap "Log in with Telegram". If an exco recorded their @username they're in straight away; otherwise they pick their name once and an exco approves it.
 - **Excos** log in on the same page as members. Their code (`tg:<number>`) is on their profile. The owner pastes it under Members, then Excos, and they get a Coach view button.

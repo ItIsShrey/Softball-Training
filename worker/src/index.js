@@ -18,6 +18,9 @@ export default {
     if (request.method === 'POST' && url.pathname === '/notify') {
       return notifyExcos(request, env, cors).catch(e => { console.log('notify error', String(e && e.message || e)); return new Response(null, { status: 204, headers: cors }); });
     }
+    if (request.method === 'POST' && url.pathname === '/announce') {
+      return announceTraining(request, env, cors).catch(e => { console.log('announce error', String(e && e.message || e)); return json({ error: 'failed' }, 500, cors); });
+    }
     if (request.method !== 'POST' || url.pathname !== '/auth/telegram') {
       return json({ error: 'not_found' }, 404, cors);
     }
@@ -88,6 +91,65 @@ async function notifyExcos(request, env, cors) {
   console.log('notify telegram', sent.status, sent.ok ? '' : await sent.text());
   return done();
 }
+
+// An exco asks the bot to post a published training to the club group, with a button to reply in the app.
+const VENUES = { MPSH: 'MPSH (hall)', Kallang: 'Kallang field', Jurong: 'Jurong field' };
+const clock = t => { const [h, m] = String(t || '').split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m || 0).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; };
+async function announceTraining(request, env, cors) {
+  const chat = env.ANNOUNCE_CHAT_ID || env.GROUP_CHAT_ID;
+  if (!chat || !env.FIREBASE_PROJECT_ID) return json({ error: 'no_chat' }, 409, cors);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'bad_request' }, 400, cors); }
+  const { idToken, date } = body || {};
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) return json({ error: 'bad_request' }, 400, cors);
+  const uid = await verifyIdToken(env, String(idToken || ''));
+  if (!uid) return json({ error: 'not_signed_in' }, 401, cors);
+  const token = await googleAccessToken(env);
+  const always = String(env.ALWAYS_ALLOW || '').split(',').map(s => 'tg:' + s.trim());
+  if (!always.includes(uid) && !(await firestoreGet(env, token, `admins/${uid}`))) return json({ error: 'not_exco' }, 403, cors);
+  const session = await firestoreGet(env, token, `sessions/${date}`);
+  if (!session || val(session, 'published') !== true) return json({ error: 'not_published' }, 409, cors);
+
+  const day = new Date(`${date}T12:00:00+08:00`).toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Singapore' });
+  const venue = VENUES[val(session, 'venue')] || val(session, 'venue') || '';
+  const text = [`New training: ${day}`, `${clock(val(session, 'start') || '15:30')} to ${clock(val(session, 'end') || '18:00')}${venue ? ' at ' + venue : ''}`, '', 'Tap below to say if you\'re coming.'].join('\n');
+  const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chat, text, disable_web_page_preview: true, reply_markup: { inline_keyboard: [[{ text: 'Reply in the app', url: env.ALLOWED_ORIGIN }]] } }),
+  });
+  if (!res.ok) { console.log('announce telegram', res.status, await res.text()); return json({ error: 'telegram_failed' }, 502, cors); }
+  const announcedAt = new Date().toISOString();
+  await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/sessions/${date}?updateMask.fieldPaths=announcedAt`, {
+    method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { announcedAt: { stringValue: announcedAt } } }),
+  });
+  return json({ ok: true, announcedAt }, 200, cors);
+}
+
+// Checks a Firebase ID token (from the signed-in page) and returns its uid, or '' if it isn't valid.
+// https://firebase.google.com/docs/auth/admin/verify-id-tokens#verify_id_tokens_using_a_third-party_jwt_library
+let jwks = null;
+async function verifyIdToken(env, idToken) {
+  const parts = idToken.split('.');
+  if (parts.length !== 3) return '';
+  let header, payload;
+  try { header = JSON.parse(b64urlText(parts[0])); payload = JSON.parse(b64urlText(parts[1])); } catch { return ''; }
+  const now = Math.floor(Date.now() / 1000);
+  if (header.alg !== 'RS256' || payload.aud !== env.FIREBASE_PROJECT_ID
+    || payload.iss !== `https://securetoken.google.com/${env.FIREBASE_PROJECT_ID}`
+    || !(payload.exp > now) || !(payload.iat <= now + 300) || !payload.sub) return '';
+  if (!jwks || jwks.exp < Date.now()) {
+    const res = await fetch('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com');
+    jwks = { keys: (await res.json()).keys || [], exp: Date.now() + 3600 * 1000 };
+  }
+  const jwk = jwks.keys.find(k => k.kid === header.kid);
+  if (!jwk) return '';
+  const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+  const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64urlBytes(parts[2]), enc.encode(parts[0] + '.' + parts[1]));
+  return ok ? String(payload.sub) : '';
+}
+function b64urlBytes(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+function b64urlText(s) { return new TextDecoder().decode(b64urlBytes(s)); }
 
 // The Worker reads Firestore as the Firebase service account (the same key it signs logins with).
 let cachedToken = null;

@@ -12,6 +12,8 @@ GROUP_CHAT_ID = ""
 ALWAYS_ALLOW = "834667219"
 # The excos' Telegram chat for last-minute reply changes (the bot must be in it). Leave empty for no alerts.
 EXCO_CHAT_ID = "-5056804168"
+# Where "Post to the Telegram group" sends trainings. Empty means GROUP_CHAT_ID.
+ANNOUNCE_CHAT_ID = "-5056804168"
 FIREBASE_PROJECT_ID = "softball-training-a2e32"
 
 # Secrets (set with `npx wrangler secret put NAME`, never commit them):
