@@ -1,84 +1,89 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    // Excos are listed in /admins (added in the coach view under Members, or in the Firebase console), by Google email or by Telegram login ID (tg:<number>).
+    // Everyone logs in with Telegram, so a real login has a uid like tg:123456789.
+    // (Guest and other sign-in types get nothing.)
+    function tgUser() { return request.auth != null && request.auth.uid.matches('tg:[0-9]+'); }
+    // The owner is the only one who can add or remove excos. Keep in step with `owner` in js/firebase-config.js.
+    function isOwner() { return tgUser() && request.auth.uid == 'tg:834667219'; }
     function isAdmin() {
-      return signedIn() && (
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-        || (request.auth.token.get('email', '') != ''
-            && request.auth.token.get('email_verified', false) == true
-            && exists(/databases/$(database)/documents/admins/$(request.auth.token.email)))
-      );
+      return isOwner() || (tgUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
     }
+    // A login linked to a name on the roster.
+    function isLinked() { return tgUser() && exists(/databases/$(database)/documents/claims/$(request.auth.uid)); }
     function claimedMember() {
       return get(/databases/$(database)/documents/claims/$(request.auth.uid)).data.memberId;
     }
 
-    // Excos add each other in the app by code. Anyone may check their own entry; nobody can remove themselves.
+    // Excos can see the list. Only the owner adds or removes excos (in the coach view, Members, Excos).
     match /admins/{id} {
-      allow read: if isAdmin() || (signedIn() && request.auth.uid == id);
-      allow create, update: if isAdmin();
-      allow delete: if isAdmin() && id != request.auth.uid && id != request.auth.token.get('email', '');
+      allow read: if isAdmin() || (tgUser() && request.auth.uid == id);
+      allow create, update, delete: if isOwner() && id.matches('tg:[0-9]+');
     }
 
-    // Coach-only data: levels, genders, drills, PINs.
-    match /members/{id}    { allow read, write: if isAdmin(); }
-    match /drills/{id}     { allow read, write: if isAdmin(); }
-    match /memberPins/{id} { allow read, write: if isAdmin(); }
+    // Coach-only data: levels, genders, drills.
+    match /members/{id} { allow read, write: if isAdmin(); }
+    match /drills/{id}  { allow read, write: if isAdmin(); }
 
-    // Names only, so members can find themselves and see teammates.
-    match /roster/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
+    // Names only, so a new login can find their name. Only people in the club's Telegram group can log in at all.
+    match /roster/{id} { allow read: if tgUser(); allow write: if isAdmin(); }
 
-    // Members see a training only once an exco ticks "Members can see this training".
+    // Linked members see a training once an exco ticks "Members can see this training".
     match /sessions/{date} {
-      allow read: if isAdmin() || (signedIn() && resource.data.published == true);
+      allow read: if isAdmin() || (isLinked() && resource.data.published == true);
       allow write: if isAdmin();
     }
 
-    // A member links their login (Telegram, or this device) to their name by proving the PIN once.
-    // The PIN is checked here and is never readable by members. Excos can see and remove links.
+    // Links a Telegram login to a roster name. Excos can see and remove links.
     match /claims/{uid} {
-      allow read, delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
-      // Excos approve a Telegram login's request to be linked to a name.
-      allow create, update: if isAdmin() && request.resource.data.keys().hasOnly(['memberId', 'approvedBy', 'at'])
+      allow read, delete: if isAdmin() || (tgUser() && request.auth.uid == uid);
+      // An exco approves a login's request to be linked to a name.
+      allow create, update: if isAdmin() && uid.matches('tg:[0-9]+')
+        && request.resource.data.keys().hasOnly(['memberId', 'approvedBy', 'at'])
         && exists(/databases/$(database)/documents/members/$(request.resource.data.memberId));
-      // A Telegram login whose @username an exco recorded on a member links itself to that member.
-      allow create, update: if signedIn() && request.auth.uid == uid
+      // A login whose @username an exco recorded on a member links itself to that member.
+      allow create, update: if tgUser() && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['memberId', 'via'])
         && request.resource.data.via == 'username'
         && request.auth.token.get('tgUsername', '') != ''
         && get(/databases/$(database)/documents/tgIndex/$(request.auth.token.tgUsername.lower())).data.memberId == request.resource.data.memberId;
-      allow create, update: if signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['memberId', 'pin'])
-        && exists(/databases/$(database)/documents/memberPins/$(request.resource.data.memberId))
-        && get(/databases/$(database)/documents/memberPins/$(request.resource.data.memberId)).data.pin == request.resource.data.pin;
     }
 
     // Telegram @username -> member, readable only by the login with that username.
     match /tgIndex/{username} {
-      allow read: if signedIn() && request.auth.token.get('tgUsername', '') != '' && username == request.auth.token.tgUsername.lower();
+      allow read: if tgUser() && request.auth.token.get('tgUsername', '') != '' && username == request.auth.token.tgUsername.lower();
       allow write: if isAdmin();
     }
 
-    // A Telegram login asks to be linked to a roster name; an exco approves it in the coach view.
+    // A login asks to be linked to a roster name; an exco approves it in the coach view.
     match /linkRequests/{uid} {
-      allow read, delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
-      allow create, update: if signedIn() && request.auth.uid == uid
+      allow read, delete: if isAdmin() || (tgUser() && request.auth.uid == uid);
+      allow create, update: if tgUser() && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['memberId', 'tgName', 'tgUsername', 'at'])
         && request.resource.data.tgName is string && request.resource.data.tgName.size() <= 100
         && request.resource.data.tgUsername == request.auth.token.get('tgUsername', '')
         && exists(/databases/$(database)/documents/roster/$(request.resource.data.memberId));
     }
 
-    // Replies: id is <date>_<memberId>. Members may only write their own, for a published training.
+    // Replies: id is <date>_<memberId>. status is yes, late, early or no; going is true unless status is no.
+    // Coming late or leaving early needs a reason, and so does changing a yes to a no.
+    function replyOk(d) {
+      return d.keys().hasOnly(['date', 'memberId', 'going', 'status', 'time', 'reason', 'prev', 'uid', 'at'])
+        && d.status in ['yes', 'late', 'early', 'no']
+        && d.going == (d.status != 'no')
+        && d.get('time', '') is string && d.get('time', '').size() <= 5
+        && d.get('reason', '') is string && d.get('reason', '').size() <= 200
+        && d.get('prev', '') in ['', 'yes', 'late', 'early', 'no']
+        && (!(d.status in ['late', 'early']) || d.get('reason', '').size() > 0);
+    }
+    function wasComing() { return resource != null && resource.data.going == true; }
     match /rsvps/{rid} {
-      allow read: if signedIn();
+      allow read: if isAdmin() || isLinked();
       allow delete: if isAdmin();
       allow create, update: if isAdmin() || (
-        signedIn()
-        && request.resource.data.keys().hasOnly(['date', 'memberId', 'going', 'uid', 'at'])
-        && request.resource.data.going is bool
+        tgUser()
+        && replyOk(request.resource.data)
+        && (request.resource.data.status != 'no' || !wasComing() || request.resource.data.get('reason', '').size() > 0)
         && request.resource.data.uid == request.auth.uid
         && rid == request.resource.data.date + '_' + request.resource.data.memberId
         && claimedMember() == request.resource.data.memberId
