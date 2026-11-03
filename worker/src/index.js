@@ -16,7 +16,7 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const url = new URL(request.url);
     if (request.method === 'POST' && url.pathname === '/notify') {
-      return notifyExcos(request, env, cors).catch(() => new Response(null, { status: 204, headers: cors }));
+      return notifyExcos(request, env, cors).catch(e => { console.log('notify error', String(e && e.message || e)); return new Response(null, { status: 204, headers: cors }); });
     }
     if (request.method !== 'POST' || url.pathname !== '/auth/telegram') {
       return json({ error: 'not_found' }, 404, cors);
@@ -44,8 +44,8 @@ export default {
 // within 24 hours of a published training, and only once per change.
 const STATUS = { yes: 'Coming', late: 'Coming late', early: 'Leaving early', no: "Can't make it" };
 async function notifyExcos(request, env, cors) {
-  const done = () => new Response(null, { status: 204, headers: cors });
-  if (!env.EXCO_CHAT_ID || !env.FIREBASE_PROJECT_ID) return done();
+  const done = why => { if (why) console.log('notify skipped:', why); return new Response(null, { status: 204, headers: cors }); };
+  if (!env.EXCO_CHAT_ID || !env.FIREBASE_PROJECT_ID) return done('EXCO_CHAT_ID or FIREBASE_PROJECT_ID not set');
   let body;
   try { body = await request.json(); } catch { return json({ error: 'bad_request' }, 400, cors); }
   const { date, memberId } = body || {};
@@ -58,19 +58,19 @@ async function notifyExcos(request, env, cors) {
     firestoreGet(env, token, `sessions/${date}`),
     firestoreGet(env, token, `roster/${memberId}`),
   ]);
-  if (!reply || !session || !person || val(session, 'published') !== true) return done();
+  if (!reply || !session || !person || val(session, 'published') !== true) return done(`missing data: reply=${!!reply} session=${!!session} person=${!!person} published=${session && val(session, 'published')}`);
   const now = Date.now();
   const changedAt = Date.parse(reply.updateTime);
   const startsAt = Date.parse(`${date}T${val(session, 'start') || '15:30'}:00+08:00`);
-  if (!(now - changedAt < 5 * 60 * 1000)) return done();
-  if (!(startsAt - changedAt < 24 * 3600 * 1000 && changedAt < startsAt + 3 * 3600 * 1000)) return done();
+  if (!(now - changedAt < 5 * 60 * 1000)) return done('reply not changed in the last 5 minutes');
+  if (!(startsAt - changedAt < 24 * 3600 * 1000 && changedAt < startsAt + 3 * 3600 * 1000)) return done('not within 24 hours of the training');
   const status = val(reply, 'status') || (val(reply, 'going') ? 'yes' : 'no');
   const prev = val(reply, 'prev') || '';
-  if (status === 'yes' && !prev) return done();
+  if (status === 'yes' && !prev) return done('first yes, nothing to report');
 
   // Once per saved change, even if the page calls twice.
   const seen = new Request(`https://dedup.local/${date}_${memberId}/${encodeURIComponent(reply.updateTime)}`);
-  if (await caches.default.match(seen)) return done();
+  if (await caches.default.match(seen)) return done('already sent');
   await caches.default.put(seen, new Response('1', { headers: { 'Cache-Control': 'max-age=86400' } }));
 
   const time = val(reply, 'time');
@@ -81,10 +81,11 @@ async function notifyExcos(request, env, cors) {
     time ? `${status === 'late' ? 'Arriving' : 'Leaving'} at ${time}.` : '',
     reason ? `Reason: ${reason}` : '',
   ].filter(Boolean).join('\n');
-  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+  const sent = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: env.EXCO_CHAT_ID, text, disable_web_page_preview: true }),
   });
+  console.log('notify telegram', sent.status, sent.ok ? '' : await sent.text());
   return done();
 }
 
@@ -103,7 +104,7 @@ async function googleAccessToken(env) {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `grant_type=${encodeURIComponent('urn:ietf:params:oauth:grant-type:jwt-bearer')}&assertion=${assertion}`,
   });
-  if (!res.ok) throw new Error('google_token_failed');
+  if (!res.ok) throw new Error('google_token_failed ' + res.status + ' ' + (await res.text()).slice(0, 200));
   const { access_token, expires_in } = await res.json();
   cachedToken = { value: access_token, exp: now + (expires_in || 3600) };
   return access_token;
@@ -112,6 +113,7 @@ async function firestoreGet(env, token, path) {
   const res = await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (!res.ok) console.log('firestore read failed', path.split('/')[0], res.status, (await res.text()).slice(0, 200));
   return res.ok ? res.json() : null;
 }
 function val(doc, key) {
