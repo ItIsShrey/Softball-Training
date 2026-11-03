@@ -52,7 +52,7 @@ To find a group's ID, open the group in Telegram Web (web.telegram.org/a): the a
 
 ### Exco alerts for last-minute changes
 
-Set `EXCO_CHAT_ID` in `worker/wrangler.toml` to the excos' Telegram chat ID and add the bot to that chat, then `npx wrangler deploy`. When a member changes their reply in the 24 hours before a training (coming late, leaving early, or a yes turned into a no), the bot posts it there with their reason. The coach view also shows these under **Last-minute changes** on the calendar.
+Set `EXCO_CHAT_ID` in `worker/wrangler.toml` to the excos' Telegram chat ID and add the bot to that chat, then `npx wrangler deploy`. When a member changes their reply in the 6 hours before a training (coming late, leaving early, or a yes turned into a no), the bot posts it there with their reason. The coach view also shows these under **Last-minute changes** on the calendar.
 
 How it works for people:
 - **Members** tap "Log in with Telegram". If an exco recorded their @username they're in straight away; otherwise they pick their name once and an exco approves it.

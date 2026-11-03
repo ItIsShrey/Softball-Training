@@ -41,7 +41,7 @@ export default {
 
 // A member changed their reply close to a training. Anyone can call this, so it trusts nothing in the
 // request: it reads the reply from Firestore and only posts a real change saved in the last few minutes,
-// within 24 hours of a published training, and only once per change.
+// within 6 hours of a published training, and only once per change.
 const STATUS = { yes: 'Coming', late: 'Coming late', early: 'Leaving early', no: "Can't make it" };
 async function notifyExcos(request, env, cors) {
   const done = why => { if (why) console.log('notify skipped:', why); return new Response(null, { status: 204, headers: cors }); };
@@ -63,7 +63,7 @@ async function notifyExcos(request, env, cors) {
   const changedAt = Date.parse(reply.updateTime);
   const startsAt = Date.parse(`${date}T${val(session, 'start') || '15:30'}:00+08:00`);
   if (!(now - changedAt < 5 * 60 * 1000)) return done('reply not changed in the last 5 minutes');
-  if (!(startsAt - changedAt < 24 * 3600 * 1000 && changedAt < startsAt + 3 * 3600 * 1000)) return done('not within 24 hours of the training');
+  if (!(startsAt - changedAt < 6 * 3600 * 1000 && changedAt < startsAt + 3 * 3600 * 1000)) return done('not within 6 hours of the training');
   const status = val(reply, 'status') || (val(reply, 'going') ? 'yes' : 'no');
   const prev = val(reply, 'prev') || '';
   if (status === 'yes' && !prev) return done('first yes, nothing to report');

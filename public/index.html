@@ -230,7 +230,7 @@ async function saveReply(date,status,time,reason){
   M.busy=true;render();
   try{await db.doc('rsvps/'+date+'_'+M.me).set(d);(M.rsvps[date]=M.rsvps[date]||{})[M.me]=d;M.form=null;M.err='';
     toast(status==='no'?'Thanks for letting us know':status==='yes'?"You're down as coming":"Saved. The excos can see it");
-    const t=startsAt(date),now=Date.now();if(t-now<24*3600e3&&now<t+3*3600e3&&(status!=='yes'||prev))notifyExcos(date,M.me)}
+    const t=startsAt(date),now=Date.now();if(t-now<6*3600e3&&now<t+3*3600e3&&(status!=='yes'||prev))notifyExcos(date,M.me)}
   catch(e){M.err="Couldn't save your reply. Try again.";if(!M.form)toast(M.err)}
   M.busy=false;render();
 }

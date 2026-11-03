@@ -312,16 +312,16 @@ function rsvpSummary(d,list){
   return `<div class="row small"><span class="pill good">${yes.length} coming</span>${late?`<span class="pill warn">${late} late</span>`:''}${early?`<span class="pill warn">${early} leaving early</span>`:''}<span class="pill bad">${no.length} can't</span><span class="muted">${list.length-yes.length-no.length} no reply</span>${missing?`<button data-act="rsvpYes">Tick the ${missing} who are coming</button>`:''}</div>
     ${notes.length?`<details><summary class="small">Late, leaving early and reasons (${notes.length})</summary><div class="list notes">${notes.sort((a,b)=>a.m.name.localeCompare(b.m.name)).map(({m,r})=>`<div class="li"><div><div class="nm">${esc(m.name)} <span class="pill ${r.status==='no'?'bad':'warn'}" style="padding:0 6px;font-size:11px">${esc(STATUS[r.status])}</span>${r.prev&&r.prev!==r.status?` <span class="small muted">was ${esc(STATUS[r.prev].toLowerCase())}</span>`:''}</div>${replyNote(r)?`<div class="small muted">${esc(replyNote(r))}</div>`:''}</div></div>`).join('')}</div></details>`:''}`;
 }
-// Replies changed in the 24 hours before a training starts, for trainings in the next 2 days.
+// Replies changed in the 6 hours before a training starts, for trainings in the next 2 days.
 function lastMinute(){
   const now=Date.now(),out=[];
   for(const x of Object.values(S.sessions)){if(!x.published)continue;const st=new Date(x.date+'T'+(x.start||'15:30')+':00').getTime();if(st<now-3*3600e3||st>now+48*3600e3)continue;
-    for(const [id,v] of Object.entries(S.rinfo[x.date]||{})){const at=Date.parse(v.at);if(!(at>=st-24*3600e3))continue;const r=reply(x.date,id);if(r.status==='yes'&&!r.prev)continue;
+    for(const [id,v] of Object.entries(S.rinfo[x.date]||{})){const at=Date.parse(v.at);if(!(at>=st-6*3600e3))continue;const r=reply(x.date,id);if(r.status==='yes'&&!r.prev)continue;
       const m=S.members.find(m=>m.id===id);if(m)out.push({x,m,r,at})}}
   return out.sort((a,b)=>b.at-a.at);
 }
 function lastMinuteHTML(){const l=lastMinute();if(!l.length)return '';
-  return `<section class="card lastmin"><div class="card-h"><h2>Last-minute changes</h2><span class="small muted">in the 24 hours before training</span></div><div class="list">${l.slice(0,12).map(({x,m,r,at})=>`<div class="li"><div><div class="nm">${esc(m.name)} <span class="pill ${r.status==='no'?'bad':r.status==='yes'?'good':'warn'}" style="padding:0 6px;font-size:11px">${esc(STATUS[r.status])}</span>${r.prev&&r.prev!==r.status?` <span class="small muted">was ${esc(STATUS[r.prev].toLowerCase())}</span>`:''}</div><div class="small muted">${esc(pretty(x.date))} · ${new Date(at).toLocaleString('en-SG',{weekday:'short',hour:'numeric',minute:'2-digit'})}${replyNote(r)?' · '+esc(replyNote(r)):''}</div></div></div>`).join('')}</div></section>`}
+  return `<section class="card lastmin"><div class="card-h"><h2>Last-minute changes</h2><span class="small muted">in the 6 hours before training</span></div><div class="list">${l.slice(0,12).map(({x,m,r,at})=>`<div class="li"><div><div class="nm">${esc(m.name)} <span class="pill ${r.status==='no'?'bad':r.status==='yes'?'good':'warn'}" style="padding:0 6px;font-size:11px">${esc(STATUS[r.status])}</span>${r.prev&&r.prev!==r.status?` <span class="small muted">was ${esc(STATUS[r.prev].toLowerCase())}</span>`:''}</div><div class="small muted">${esc(pretty(x.date))} · ${new Date(at).toLocaleString('en-SG',{weekday:'short',hour:'numeric',minute:'2-digit'})}${replyNote(r)?' · '+esc(replyNote(r)):''}</div></div></div>`).join('')}</div></section>`}
 function dots(n){return `<span class="dots" aria-label="Level ${n} of 5">${[1,2,3,4,5].map(i=>`<i class="${i<=n?'on':''}"></i>`).join('')}</span>`}
 
 function membersHTML(){
