@@ -60,10 +60,12 @@ function nextTraining(){const d=new Date();for(let i=0;i<7;i++){const x=new Date
 
 const S={db:null,user:null,pins:{},links:{},roster:{},rsvps:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
   members:[],drills:[],sessions:{},view:'plan',draft:null,dirty:false,blocksEdited:false,
-  mf:null,df:null,paste:'',pasteMsg:'',confirm:null,admins:[],exCode:'',exName:'',planDate:null,calMonth:null,calSel:null};
+  mf:null,df:null,paste:'',pasteMsg:'',confirm:null,admins:[],reqs:[],exCode:'',exName:'',planDate:null,calMonth:null,calSel:null};
 S.calSel=nextTraining();S.calMonth=S.calSel.slice(0,7);
 
-function newMemberForm(){return {id:null,name:'',level:3,pos:[],gender:'',pin:newPin()}}
+function newMemberForm(){return {id:null,name:'',level:3,pos:[],gender:'',tg:'',pin:telegramEnabled?'':newPin()}}
+const tgNorm=s=>String(s||'').trim().replace(/^@/,'').replace(/^https?:\/\/t\.me\//i,'').toLowerCase();
+const tgOk=u=>/^[a-z0-9_]{4,32}$/.test(u);
 function newPin(){return String(Math.floor(Math.random()*10000)).padStart(4,'0')}
 function newDrillForm(){return {id:null,name:'',minutes:15,category:'fielding',venues:['MPSH','Field'],station:false,auto:true,notes:''}}
 S.mf=newMemberForm();S.df=newDrillForm();
@@ -136,6 +138,7 @@ function present(d){return d.attendees.map(id=>S.members.find(m=>m.id===id)).fil
 /* ---------- rendering ---------- */
 function render(){
   document.querySelectorAll('[data-tab]').forEach(a=>a.setAttribute('aria-current',a.dataset.tab===S.view?'page':'false'));
+  const mt=document.querySelector('[data-tab="members"]');if(mt)mt.innerHTML='Members'+(S.reqs.length?` <span class="badge">${S.reqs.length}</span>`:'');
   const app=$('#app');
   const so=$('#signout');if(so)so.hidden=!S.user;
   if(S.status==='loading')return;
@@ -265,7 +268,19 @@ function calHTML(){
   const up=Object.values(S.sessions).filter(v=>v.date>=today2).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,6);
   const upcoming=`<section class="card"><h2>Coming up</h2>${up.length?`<div class="saved">${up.map(v=>`<button data-act="calPick" data-date="${v.date}" aria-current="${v.date===sel}"><span>${esc(pretty(v.date))} · ${esc(venueLabel(v.venue))}</span><span class="muted small">${v.published?'posted':'draft'}</span></button>`).join('')}</div>`:'<p class="muted small" style="margin:0">No upcoming plans. Pick a day on the calendar to make one.</p>'}</section>`;
   const unsaved=S.draft&&S.dirty?`<div class="banner">You have unsaved changes on ${esc(pretty(S.draft.date))}. <button class="ghost" data-act="openPlan" data-date="${S.draft.date}">Go back to it</button></div>`:'';
-  return `${unsaved}<div class="cols"><div class="stack">${grid}</div><div class="stack">${panel}${upcoming}</div></div>`;
+  const waiting=S.reqs.length?`<div class="banner">${S.reqs.length} ${S.reqs.length===1?'person is':'people are'} waiting to be linked to their name. <a href="#members">Review in Members</a></div>`:'';
+  return `${waiting}${unsaved}<div class="cols"><div class="stack">${grid}</div><div class="stack">${panel}${upcoming}</div></div>`;
+}
+function requestsHTML(){
+  if(!S.reqs.length)return '';
+  const ms=[...S.members].sort((a,b)=>a.name.localeCompare(b.name));
+  return `<section class="card" style="margin-bottom:16px"><div class="card-h"><h2>New logins</h2><span class="small muted">${S.reqs.length} waiting</span></div>
+    <p class="small muted" style="margin:0">These people logged in with Telegram and picked a name. Check it's really them, then approve.</p>
+    <div class="list">${S.reqs.map(r=>{const other=S.links[r.memberId]&&S.links[r.memberId]!==r.id;
+      return `<div class="li req"><div><div class="nm">${esc(r.tgName||'Telegram user')}${r.tgUsername?` <span class="muted small">@${esc(r.tgUsername)}</span>`:''}</div>
+        <label class="small muted" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">says they're <select id="rq-${esc(r.id)}" aria-label="Member for ${esc(r.tgName||'this login')}">${ms.map(m=>`<option value="${esc(m.id)}"${m.id===r.memberId?' selected':''}>${esc(m.name)}</option>`).join('')}</select></label>
+        ${other?'<div class="small" style="color:var(--warn)">That name is already linked to another Telegram account. Approving moves it here.</div>':''}</div>
+        <div class="row"><button class="primary" data-act="reqOk" data-id="${esc(r.id)}">Approve</button><button class="ghost danger" data-act="reqNo" data-id="${esc(r.id)}">${S.confirm==='rq'+r.id?'Tap again':'Not them'}</button></div></div>`}).join('')}</div></section>`;
 }
 function adminName(a){if(a.name)return a.name;const mid=Object.keys(S.links).find(k=>S.links[k]===a.id);const m=mid&&S.members.find(m=>m.id===mid);return m?m.name:''}
 function excosHTML(){
@@ -304,22 +319,29 @@ function membersHTML(){
     </div></section>`:'';
   const form=`<section class="card"><h2>${f.id?'Edit member':'Add a member'}</h2>
     <label class="f">Name<input id="mf-name" data-input="mf.name" value="${esc(f.name)}" placeholder="As shown in the Telegram group" autocomplete="off"></label>
+    ${telegramEnabled?`<label class="f">Telegram @username<input id="mf-tg" data-input="mf.tg" value="${esc(f.tg)}" placeholder="@username" autocomplete="off" autocapitalize="off" spellcheck="false"><span class="small muted" style="font-weight:400">When they log in with this Telegram, they're linked to this name automatically.</span></label>`:''}
     <div style="display:grid;gap:6px"><span class="eyebrow">Proficiency level</span>
       <div class="seg" role="group" aria-label="Proficiency level" style="flex-wrap:wrap">${[1,2,3,4,5].map(l=>`<button data-act="mlevel" data-n="${l}" aria-pressed="${f.level===l}">${l} · ${LEVELS[l]}</button>`).join('')}</div></div>
     <div style="display:grid;gap:6px"><span class="eyebrow">Gender</span>
       <div class="seg" role="group" aria-label="Gender">${GENDER.map(([k,l])=>`<button data-act="mgender" data-g="${k}" aria-pressed="${f.gender===k}">${l}</button>`).join('')}</div></div>
     <div style="display:grid;gap:6px"><span class="eyebrow">Positions</span>
       <div class="chips">${POS.map(([k,l])=>`<button class="chip" data-act="mpos" data-p="${k}" aria-pressed="${f.pos.includes(k)}">${l}</button>`).join('')}</div></div>
-    <label class="f">Member PIN<div class="row" style="flex-wrap:nowrap"><input id="mf-pin" data-input="mf.pin" value="${esc(f.pin)}" inputmode="numeric" maxlength="4" placeholder="4 digits" style="max-width:120px"><button data-act="mpin">New PIN</button></div><span class="small muted" style="font-weight:400">They use this with their name to reply to trainings.</span></label>
+    ${telegramEnabled?'':`<label class="f">Member PIN<div class="row" style="flex-wrap:nowrap"><input id="mf-pin" data-input="mf.pin" value="${esc(f.pin)}" inputmode="numeric" maxlength="4" placeholder="4 digits" style="max-width:120px"><button data-act="mpin">New PIN</button></div><span class="small muted" style="font-weight:400">They use this with their name to reply to trainings.</span></label>`}
     <div class="row"><button class="primary" data-act="msave"${S.readOnly?' disabled':''}>${f.id?'Save changes':'Add member'}</button>${f.id?'<button data-act="mcancel">Cancel</button>':''}</div>
   </section>`;
-  const list=`<section class="card"><h2>Roster</h2>${ms.length?`<div class="list">${ms.map(m=>`<div class="li"><div><div class="nm">${esc(m.name)}</div><div class="small muted">${S.links[m.id]?'<span class="pill good" style="padding:0 6px;font-size:11px">Telegram</span> ':''}${S.pins[m.id]?'':'<span class="pill warn" style="padding:0 6px;font-size:11px">no PIN</span> '}${dots(m.level||0)} ${esc(LEVELS[m.level]||'')}${m.gender?' · '+esc((GENDER.find(x=>x[0]===m.gender)||[,''])[1]):''}${(m.pos||[]).length?' · '+esc(m.pos.map(p=>(POS.find(x=>x[0]===p)||[,p])[1]).join(', ')):''}</div></div>
+  const list=`<section class="card"><h2>Roster</h2>${ms.length?`<div class="list">${ms.map(m=>`<div class="li"><div><div class="nm">${esc(m.name)}${m.tg?` <span class="muted small" style="font-weight:400">@${esc(m.tg)}</span>`:''}</div><div class="small muted">${S.links[m.id]?'<span class="pill good" style="padding:0 6px;font-size:11px">Telegram</span> ':''}${telegramEnabled?(S.links[m.id]?'':'<span class="pill" style="padding:0 6px;font-size:11px;color:var(--muted)">not linked</span> '):S.pins[m.id]?'':'<span class="pill warn" style="padding:0 6px;font-size:11px">no PIN</span> '}${dots(m.level||0)} ${esc(LEVELS[m.level]||'')}${m.gender?' · '+esc((GENDER.find(x=>x[0]===m.gender)||[,''])[1]):''}${(m.pos||[]).length?' · '+esc(m.pos.map(p=>(POS.find(x=>x[0]===p)||[,p])[1]).join(', ')):''}</div></div>
       <div class="row"><button class="ghost" data-act="medit" data-id="${esc(m.id)}">Edit</button><button class="ghost danger" data-act="mdel" data-id="${esc(m.id)}">${S.confirm==='m'+m.id?'Tap again':'Delete'}</button></div></div>`).join('')}</div>`
     :'<div class="empty">Your roster is empty. Add each player with a level from 1 (new) to 5 (standout) so teams can be balanced.</div>'}</section>`;
   const nopin=ms.filter(m=>!S.pins[m.id]).length;
-  const pins=ms.length?`<section class="card"><div class="card-h"><h2>Member PINs</h2><div class="row">${nopin?`<button data-act="pinsAll">Give PINs to ${nopin} without one</button>`:''}<button data-act="pinsCopy">Copy PIN list</button></div></div><p class="small muted" style="margin:0">Members sign in on the member page with their name and PIN. Send each person their own PIN.</p></section>`
+  const nouser=ms.filter(m=>!m.tg).length;
+  const tgCard=`<section class="card"><div class="card-h"><h2>Telegram usernames</h2><span class="small muted">${ms.length-nouser} of ${ms.length} added</span></div>
+    <p class="small muted" style="margin:0">Members whose @username is here are linked automatically when they log in. Anyone else picks their name and you approve them under New logins.</p>
+    <details${S.tgPaste?' open':''}><summary class="small">Paste a list</summary><div style="display:grid;gap:8px">
+      <textarea id="tg-paste" data-input="tgPaste" placeholder="One per line, e.g.&#10;Jane Tan @janetan&#10;Alex Lim - @alexl">${esc(S.tgPaste||'')}</textarea>
+      <div class="row"><button data-act="tgPasteSave">Save usernames</button><span class="small muted">${esc(S.tgMsg||'')}</span></div></div></details></section>`;
+  const pins=ms.length?(telegramEnabled?tgCard:`<section class="card"><div class="card-h"><h2>Member PINs</h2><div class="row">${nopin?`<button data-act="pinsAll">Give PINs to ${nopin} without one</button>`:''}<button data-act="pinsCopy">Copy PIN list</button></div></div><p class="small muted" style="margin:0">Members sign in on the member page with their name and PIN. Send each person their own PIN.</p></section>`)
     :`<section class="card"><h2>Import roster</h2><p class="small muted" style="margin:0">Load the backup file with your members and drills to get started.</p><input type="file" id="import-file" accept="application/json,.json"></section>`;
-  return `<div class="cols"><div class="stack">${form}${pins}${excosHTML()}</div><div class="stack">${summary}${list}</div></div>`;
+  return `${requestsHTML()}<div class="cols"><div class="stack">${form}${pins}${excosHTML()}</div><div class="stack">${summary}${list}</div></div>`;
 }
 
 function drillsHTML(){
@@ -527,6 +549,16 @@ const A={
   openPlan({date}){location.hash='plan/'+date},
   backCal(){if(S.draft)S.calSel=S.draft.date;location.hash='plan'},
   copyCode({code}){copyText(code,'Code copied')},
+  async tgPasteSave(){const lines=String(S.tgPaste||'').split('\n').map(l=>l.trim()).filter(Boolean);let ok=0;const miss=[];
+    for(const l of lines){const h=(l.match(/@?([A-Za-z0-9_]{4,32})\s*$/)||l.match(/@([A-Za-z0-9_]{4,32})/)||[])[1];const nm=h?l.replace(new RegExp('[-–:,\\s]*@?'+h+'\\s*$'),'').replace('@'+h,'').trim():'';
+      const {hit}=nm?matchNames(nm):{hit:[]};const m=hit.length===1&&S.members.find(x=>x.id===hit[0]);
+      if(!h||!m){miss.push(l);continue}const tg=tgNorm(h);if(S.members.some(x=>x.id!==m.id&&x.tg===tg)){miss.push(l);continue}
+      if(!await write(async()=>{await S.db.doc('members/'+m.id).update({tg});await setTgIndex(m.id,m.tg,tg)}))return;m.tg=tg;ok++}
+    S.tgMsg=`Saved ${ok}.`+(miss.length?` Couldn't match: ${miss.join('; ')}`:'');if(!miss.length)S.tgPaste='';render()},
+  async reqOk({id}){const sel=document.getElementById('rq-'+id);const mid=sel&&sel.value;const m=S.members.find(m=>m.id===mid);if(!m)return toast('Pick their name first.');
+    const old=S.links[mid];
+    if(await write(async()=>{if(old&&old!==id)await S.db.doc('claims/'+old).delete();await S.db.doc('claims/'+id).set({memberId:mid,approvedBy:S.user.uid,at:new Date().toISOString()});await S.db.doc('linkRequests/'+id).delete()},`${m.name} is linked`))render()},
+  async reqNo({id}){if(!armConfirm('rq'+id))return;await write(()=>S.db.doc('linkRequests/'+id).delete(),'Request removed');render()},
   async exAdd(){const code=S.exCode.trim();
     if(!/^tg:\d{3,}$/.test(code)&&!/^[^@\s/]+@[^@\s/]+\.[^@\s/]+$/.test(code))return toast('Paste their code, which looks like tg:123456789.');
     if(S.admins.some(a=>a.id===code))return toast("They're already an exco.");
@@ -540,21 +572,23 @@ const A={
   mlevel({n}){S.mf.level=+n},
   mgender({g}){S.mf.gender=S.mf.gender===g?'':g},
   mpos({p}){const a=S.mf.pos;const i=a.indexOf(p);i>=0?a.splice(i,1):a.push(p)},
-  medit({id}){const m=S.members.find(m=>m.id===id);if(m){S.mf={id:m.id,name:m.name,level:m.level||3,pos:[...(m.pos||[])],gender:m.gender||'',pin:(S.pins[m.id]||'')};scrollTo({top:0})}},
+  medit({id}){const m=S.members.find(m=>m.id===id);if(m){S.mf={id:m.id,name:m.name,level:m.level||3,pos:[...(m.pos||[])],gender:m.gender||'',pin:(S.pins[m.id]||''),tg:m.tg?'@'+m.tg:''};scrollTo({top:0})}},
   mcancel(){S.mf=newMemberForm()},
   async msave(){const f=S.mf;const name=f.name.trim();if(!name)return toast('Enter a name first.');
     if(S.members.some(m=>m.id!==f.id&&norm(m.name)===norm(name)))return toast(`${name} is already on the roster.`);
     const ref=f.id?S.db.doc('members/'+f.id):S.db.collection('members').doc();
     const old=f.id?S.members.find(m=>m.id===f.id):null;
     const pin=String(f.pin||'').trim();if(pin&&!/^\d{4}$/.test(pin))return toast('The PIN needs to be 4 digits.');
-    if(await write(async()=>{await ref.set({name,level:f.level,pos:f.pos,gender:f.gender,active:old?.active??true});await S.db.doc('roster/'+ref.id).set({name});if(pin&&pin!==S.pins[ref.id])await S.db.doc('memberPins/'+ref.id).set({pin})},f.id?'Member updated':`${name} added`)){S.mf=newMemberForm();render()}},
+    const tg=tgNorm(f.tg);if(tg&&!tgOk(tg))return toast("That doesn't look like a Telegram username.");
+    const clash=tg&&S.members.find(m=>m.id!==f.id&&m.tg===tg);if(clash)return toast(`@${tg} is already on ${clash.name}.`);
+    if(await write(async()=>{await ref.set({name,level:f.level,pos:f.pos,gender:f.gender,active:old?.active??true,...(tg?{tg}:{})});await S.db.doc('roster/'+ref.id).set({name});await setTgIndex(ref.id,old?.tg,tg);if(pin&&pin!==S.pins[ref.id])await S.db.doc('memberPins/'+ref.id).set({pin})},f.id?'Member updated':`${name} added`)){S.mf=newMemberForm();render()}},
   mpin(){S.mf.pin=newPin()},
   async pinsAll(){const miss=S.members.filter(m=>!S.pins[m.id]);for(const m of miss){if(!await write(()=>S.db.doc('memberPins/'+m.id).set({pin:newPin()})))return}toast(`Gave ${miss.length} members a PIN`)},
   pinsCopy(){const t=[...S.members].sort((a,b)=>a.name.localeCompare(b.name)).map(m=>`${m.name}: ${S.pins[m.id]||'no PIN yet'}`).join('\n');copyText(t,'PIN list copied. Send each member their own PIN privately.')},
   rsvpYes(){const d=S.draft,rv=S.rsvps[d.date]||{};S.members.forEach(m=>{if(rv[m.id]===true&&!d.attendees.includes(m.id)){d.attendees.push(m.id);d.teams[m.id]=smallestTeam(d)}});markDirty()},
   async signin(){try{await signInGoogle();S.user=auth.currentUser;start()}catch(e){toast("Sign-in didn't finish. Try again.")}},
   async signout(){await logOut();location.reload()},
-  async mdel({id}){if(!armConfirm('m'+id))return;await write(async()=>{await S.db.doc('members/'+id).delete();await S.db.doc('roster/'+id).delete();await S.db.doc('memberPins/'+id).delete()},'Member removed');if(S.mf.id===id)S.mf=newMemberForm();render()},
+  async mdel({id}){if(!armConfirm('m'+id))return;await write(async()=>{await S.db.doc('members/'+id).delete();await S.db.doc('roster/'+id).delete();await S.db.doc('memberPins/'+id).delete();const m=S.members.find(m=>m.id===id);if(m&&m.tg)await S.db.doc('tgIndex/'+m.tg).delete()},'Member removed');if(S.mf.id===id)S.mf=newMemberForm();render()},
   dvenue({v}){const a=S.df.venues;const i=a.indexOf(v);i>=0?a.splice(i,1):a.push(v)},
   dedit({id}){const x=S.drills.find(x=>x.id===id);if(x){S.df={id:x.id,name:x.name,minutes:x.minutes,category:x.category,venues:[...(x.venues||[])],station:!!x.station,auto:!!x.auto,notes:x.notes||'',order:x.order};scrollTo({top:0})}},
   dcancel(){S.df=newDrillForm()},
@@ -576,7 +610,7 @@ document.addEventListener('input',e=>{
   const k=e.target.dataset.input;if(!k)return;
   if(k==='attQ'){S.attQ=e.target.value;render();return}
   if(k==='paste')S.paste=e.target.value;
-  else if(k==='exCode'||k==='exName')S[k]=e.target.value;
+  else if(k==='exCode'||k==='exName'||k==='tgPaste')S[k]=e.target.value;
   else{const [o,f]=k.split('.');S[o][f]=e.target.value}
 });
 document.addEventListener('change',e=>{
@@ -620,10 +654,12 @@ function afterData(){
 async function importBackup(file){
   let data;try{data=JSON.parse(await file.text())}catch(e){return toast("That file isn't a planner backup.")}
   const ms=data.members||[],ds=data.drills||[];let n=0;
-  for(const m of ms){const {id,...rest}=m;if(!await write(async()=>{await S.db.doc('members/'+id).set(rest);await S.db.doc('roster/'+id).set({name:rest.name})}))return;n++}
+  for(const m of ms){const {id,...rest}=m;if(rest.tg)rest.tg=tgNorm(rest.tg);if(!await write(async()=>{await S.db.doc('members/'+id).set(rest);await S.db.doc('roster/'+id).set({name:rest.name});if(rest.tg)await setTgIndex(id,null,rest.tg)}))return;n++}
   for(const x of ds){const {id,...rest}=x;if(!await write(()=>S.db.doc('drills/'+id).set(rest)))return}
   toast(`Imported ${n} members and ${ds.length} drills`);
 }
+// tgIndex/<username> lets a Telegram login find its own member, and nothing else.
+async function setTgIndex(id,oldTg,tg){if(oldTg&&oldTg!==tg)await S.db.doc('tgIndex/'+oldTg).delete().catch(()=>{});if(tg)await S.db.doc('tgIndex/'+tg).set({memberId:id})}
 let rosterSynced=false;
 async function syncRoster(){
   // members can only read names, so keep roster/{id} in step with members/{id}
@@ -639,6 +675,7 @@ function start(){
   db.collection('memberPins').onSnapshot(s=>{S.pins=Object.fromEntries(s.docs.map(x=>[x.id,x.data().pin]));if(S.status==='ok')render()},fail);
   db.collection('roster').onSnapshot(s=>{S.roster=Object.fromEntries(s.docs.map(x=>[x.id,x.data().name]));S.ready.r=1;syncRoster()},fail);
   db.collection('claims').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();if(x.id.startsWith('tg:'))o[v.memberId]=x.id});S.links=o;if(S.status==='ok')render()},()=>{});
+  db.collection('linkRequests').onSnapshot(s=>{S.reqs=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>String(a.at).localeCompare(String(b.at)));if(S.status==='ok')render()},()=>{});
   db.collection('admins').onSnapshot(s=>{S.admins=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>(adminName(a)||a.id).localeCompare(adminName(b)||b.id));if(S.status==='ok')render()},()=>{});
   db.collection('rsvps').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]=v.going});S.rsvps=o;if(S.status==='ok')render()},fail);
 }

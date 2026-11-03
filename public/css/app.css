@@ -213,3 +213,6 @@ details[open] summary{margin-bottom:8px}
 .codebox{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .codebox code{font-family:var(--mono);font-size:15px;flex:1;min-width:0;overflow-wrap:anywhere}
 .btnlink{display:inline-flex;align-items:center;padding:8px 14px;border-radius:7px;background:var(--field);color:var(--field-ink);font-weight:600;text-decoration:none}
+.badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--bad);color:#fff;font-size:11px;font-weight:700;line-height:1;vertical-align:1px}
+.li.req{align-items:center}
+.li.req select{max-width:220px}

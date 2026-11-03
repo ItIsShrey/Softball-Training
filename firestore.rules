@@ -40,10 +40,35 @@ service cloud.firestore {
     // The PIN is checked here and is never readable by members. Excos can see and remove links.
     match /claims/{uid} {
       allow read, delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      // Excos approve a Telegram login's request to be linked to a name.
+      allow create, update: if isAdmin() && request.resource.data.keys().hasOnly(['memberId', 'approvedBy', 'at'])
+        && exists(/databases/$(database)/documents/members/$(request.resource.data.memberId));
+      // A Telegram login whose @username an exco recorded on a member links itself to that member.
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['memberId', 'via'])
+        && request.resource.data.via == 'username'
+        && request.auth.token.get('tgUsername', '') != ''
+        && get(/databases/$(database)/documents/tgIndex/$(request.auth.token.tgUsername.lower())).data.memberId == request.resource.data.memberId;
       allow create, update: if signedIn() && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['memberId', 'pin'])
         && exists(/databases/$(database)/documents/memberPins/$(request.resource.data.memberId))
         && get(/databases/$(database)/documents/memberPins/$(request.resource.data.memberId)).data.pin == request.resource.data.pin;
+    }
+
+    // Telegram @username -> member, readable only by the login with that username.
+    match /tgIndex/{username} {
+      allow read: if signedIn() && request.auth.token.get('tgUsername', '') != '' && username == request.auth.token.tgUsername.lower();
+      allow write: if isAdmin();
+    }
+
+    // A Telegram login asks to be linked to a roster name; an exco approves it in the coach view.
+    match /linkRequests/{uid} {
+      allow read, delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['memberId', 'tgName', 'tgUsername', 'at'])
+        && request.resource.data.tgName is string && request.resource.data.tgName.size() <= 100
+        && request.resource.data.tgUsername == request.auth.token.get('tgUsername', '')
+        && exists(/databases/$(database)/documents/roster/$(request.resource.data.memberId));
     }
 
     // Replies: id is <date>_<memberId>. Members may only write their own, for a published training.

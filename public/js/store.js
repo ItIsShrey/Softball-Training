@@ -23,9 +23,17 @@ export const logOut = () => signOut(auth);
 export async function signInTelegram(tgUser) {
   const res = await fetch(telegram.authUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tgUser) });
   if (!res.ok) throw new Error('telegram_login_failed');
-  const { token } = await res.json();
+  const { token, name } = await res.json();
   await signInWithCustomToken(auth, token);
+  try { localStorage.setItem('tgProfile', JSON.stringify({ name: name || '', username: tgUser.username || '' })); } catch (e) {}
   return auth.currentUser;
+}
+// Telegram name and @username of the person logged in, for link requests. The username comes from the signed token.
+export async function telegramProfile() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('tgProfile') || '{}'); } catch (e) {}
+  const claims = auth.currentUser ? (await auth.currentUser.getIdTokenResult()).claims : {};
+  return { name: saved.name || '', username: claims.tgUsername || '' };
 }
 // Draws Telegram's official login button into el; onUser gets the signed login data.
 export function mountTelegramButton(el, onUser) {
