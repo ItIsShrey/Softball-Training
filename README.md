@@ -3,7 +3,7 @@
 Two pages, hosted on Firebase:
 
 - **`/` (member view)**: members pick their name, enter their 4-digit PIN once, then see upcoming trainings, reply "I'm coming" or "Can't make it", and see their team, game position and batting spot once excos publish them.
-- **`/coach` (coach and exco view)**: plan sessions from attendance and the drill library, balance teams by level and gender, set game lineups on a field or list view, manage members and their PINs, and see poll replies.
+- **`/coach` (coach and exco view)**: opens on a month calendar with planned days highlighted. Tap a day to view its plan or make one. Plan sessions from attendance and the drill library, balance teams by level and gender, set game lineups on a field or list view, manage members and their PINs, and see poll replies.
 
 No build step. The pages are plain HTML and JavaScript that load the Firebase SDK from Google's CDN.
 
@@ -13,7 +13,7 @@ No build step. The pages are plain HTML and JavaScript that load the Firebase SD
 2. **Add a web app**: Project settings → Your apps → Web. Copy the `firebaseConfig` values into `public/js/firebase-config.js`.
 3. **Turn on sign-in methods**: Authentication → Sign-in method → enable **Google** (for excos) and **Anonymous** (for members).
 4. **Create the database**: Firestore Database → Create database → production mode, region `asia-southeast1` (Singapore).
-5. **Add excos**: in Firestore, create a collection `admins` and add one document per exco, with the document ID set to their Google email (for example `shrey@gmail.com`). The fields can be empty.
+5. **Add the first exco**: in Firestore, create a collection `admins` and add one document whose ID is your code. Your code is `tg:<number>` with Telegram login (shown on your profile and on the coach page), or your Google email without it. The fields can be empty. After that, excos add each other in the app under Members, then Excos.
 6. **Deploy**:
    ```sh
    npm install -g firebase-tools
@@ -46,7 +46,7 @@ Members and excos can log in with Telegram instead of PIN-only or Google. Telegr
 
 How it works for people:
 - **Members** tap "Log in with Telegram", then once pick their name and enter their PIN. That links their Telegram for good, on any phone.
-- **Excos** can use Telegram too. After their first try, the coach page shows their ID (`tg:<number>`). Add a document with that ID to the `admins` collection. Google email IDs keep working.
+- **Excos** log in on the same page as members. Their code (`tg:<number>`) is on their profile. An existing exco pastes it under Members, then Excos, and they get a Coach view button. Nobody can remove themselves from the list.
 - The Members tab shows a **Telegram** badge for linked members.
 
 ## Running a training

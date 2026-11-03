@@ -185,3 +185,31 @@ details[open] summary{margin-bottom:8px}
 .chips.att{max-height:228px;overflow-y:auto;padding:2px}
 .chips.att .chip{padding:4px 10px;font-size:13px}
 .seg button[aria-pressed="true"] .muted{color:inherit;opacity:.75}
+
+/* Calendar (coach view opens on this) */
+.plan-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.cal-g{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cal-h{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:center;padding-bottom:2px}
+.cd{position:relative;aspect-ratio:1/1;min-height:40px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);color:var(--ink);padding:4px;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;font-weight:500;overflow:hidden}
+.cd.blank{border:0;background:transparent}
+.cd .cd-n{font-family:var(--mono);font-size:13px}
+.cd .cd-v{font-size:10px;font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85}
+.cd.tday{border-style:dashed;border-color:color-mix(in srgb,var(--field) 55%,var(--line))}
+.cd.has{background:color-mix(in srgb,var(--field) 22%,var(--surface));border-color:var(--field);border-style:solid}
+.cd.pub{background:var(--field);color:var(--field-ink)}
+.cd.today .cd-n{background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:0 5px}
+.cd.unsaved::after{content:"";position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--warn)}
+.cd[aria-pressed="true"]{outline:2px solid var(--ink);outline-offset:1px}
+.cal-key{display:flex;gap:6px 14px;flex-wrap:wrap}
+.cal-key span{display:inline-flex;align-items:center;gap:6px}
+.k{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid var(--line);background:var(--sunk)}
+.k.has{background:color-mix(in srgb,var(--field) 22%,var(--surface));border-color:var(--field)}
+.k.pub{background:var(--field);border-color:var(--field)}
+.k.tday{border:1px dashed color-mix(in srgb,var(--field) 55%,var(--line))}
+.cal-sum{display:flex;gap:4px 14px;flex-wrap:wrap;color:var(--muted);font-size:14px}
+@media (max-width:420px){.cal-g{gap:3px}.cd{padding:3px;border-radius:6px}.cd .cd-v{display:none}}
+
+/* Codes for exco access */
+.codebox{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.codebox code{font-family:var(--mono);font-size:15px;flex:1;min-width:0;overflow-wrap:anywhere}
+.btnlink{display:inline-flex;align-items:center;padding:8px 14px;border-radius:7px;background:var(--field);color:var(--field-ink);font-weight:600;text-decoration:none}
