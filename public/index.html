@@ -31,6 +31,7 @@ input.big{font-size:18px;padding:12px 14px}
 .plan-row .time{padding-top:1px}
 .names{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:14px}
 .me-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.me-bar .row{gap:6px}
 </style>
 </head>
 <body>
@@ -57,7 +58,11 @@ const ordinal=n=>n+(['th','st','nd','rd'][(n%100-20)%10]||['th','st','nd','rd'][
 const firstName=n=>{n=String(n||'');if(n.includes(','))return n.split(',')[1].trim();return n};
 const norm=s=>String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();
 
-const M={status:'loading',uid:null,me:null,roster:{},sessions:[],rsvps:{},q:'',pick:null,pin:'',err:'',busy:false,open:{}};
+const NEXT=new URLSearchParams(location.search).get('next');
+const M={admin:false,showProfile:false,uid:null,me:null,roster:{},sessions:[],rsvps:{},q:'',pick:null,pin:'',err:'',busy:false,open:{}};
+function copyText(txt){const done=()=>toast('Code copied');
+  const fallback=()=>{const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}ta.remove();ok?done():toast("Couldn't copy. Press and hold the code to copy it.")};
+  try{navigator.clipboard.writeText(txt).then(done,fallback)}catch(e){fallback()}}
 let toastT;
 function toast(msg){const el=$('#toast');el.textContent=msg;el.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>el.hidden=true,2600)}
 
@@ -74,8 +79,8 @@ function render(){
 }
 
 function tgLoginHTML(){
-  return `<section class="card"><h2>Log in</h2>
-    <p class="muted" style="margin:0">Use your Telegram account. You'll confirm in the Telegram app.</p>
+  return `<section class="card"><h2>${NEXT==='coach'?'Log in to the coach view':'Log in'}</h2>
+    <p class="muted" style="margin:0">Everyone logs in here with Telegram, members and excos alike. You'll confirm in the Telegram app.</p>
     <div id="tg-login" style="min-height:48px"></div>
     ${M.err?`<div class="banner bad">${esc(M.err)}</div>`:''}</section>`;
 }
@@ -98,9 +103,17 @@ function loginHTML(){
       <button class="primary" data-act="claim" style="padding:12px;font-size:16px"${M.busy?' disabled':''}>${M.busy?'Checking…':'Continue'}</button>`
     :`<label class="f">Your name<input class="big" id="q" data-input="q" value="${esc(M.q)}" placeholder="Start typing your name" autocomplete="off"></label>
       <div class="who">${hits.map(([id,n])=>`<button data-act="pick" data-id="${esc(id)}">${esc(n)}</button>`).join('')||(q?'<p class="small muted" style="margin:0">No one by that name. Ask an exco to add you.</p>':'')}</div>`}
-  </section>`;
+    ${M.admin?'<div class="row"><button class="ghost" data-act="skip">Skip for now</button></div>':''}
+  </section>${profileHTML()}`;
 }
 
+function profileHTML(){
+  return `<section class="card"><h2>Your profile</h2>
+    ${M.me?`<div class="row" style="justify-content:space-between"><span>${esc(M.roster[M.me]||'')}</span><button class="ghost" data-act="switch">Not you?</button></div>`:''}
+    <div style="display:grid;gap:6px"><span class="eyebrow">Your code</span><div class="codebox"><code>${esc(M.uid||'')}</code><button data-act="copyCode">Copy</button></div>
+    <span class="small muted">${M.admin?"You're an exco, so you can open the coach view.":"Excos: send this code to the club's exco so they can give you access to the planner."}</span></div>
+    ${M.me?'':'<div class="row"><button class="ghost" data-act="logout">Log out</button></div>'}</section>`;
+}
 function myRsvp(date){return (M.rsvps[date]||{})[M.me]}
 function trainingHTML(x){
   const start=toMin(x.start),end=toMin(x.end);
@@ -146,13 +159,20 @@ function trainingHTML(x){
 function homeHTML(){
   const today=iso(new Date());
   const up=M.sessions.filter(x=>x.date>=today).sort((a,b)=>a.date.localeCompare(b.date));
-  return `<div class="me-bar"><span>Hi <b>${esc(firstName(M.roster[M.me]||''))}</b></span><button class="ghost" data-act="switch">Not you?</button></div>
+  const bar=`<div class="me-bar"><span>Hi${M.me?` <b>${esc(firstName(M.roster[M.me]||''))}</b>`:''}</span><div class="row">${M.admin?'<a class="btnlink" href="coach.html">Coach view</a>':''}<button class="ghost" data-act="profile" aria-expanded="${M.showProfile}">Profile</button></div></div>${M.showProfile?profileHTML():''}`;
+  if(!M.me)return bar+`<section class="card"><h2>Link your name</h2><p class="muted" style="margin:0">To reply to trainings, find your name and enter the PIN from your exco. You only do this once.</p><div class="row"><button class="primary" data-act="tolink">Find my name</button></div></section>`;
+  return `${bar}
     ${up.length?up.map(trainingHTML).join(''):`<section class="card"><h2>No trainings posted</h2><p class="muted" style="margin:0">When the excos post the next training, it'll show here and you can reply.</p></section>`}`;
 }
 
 const A={
   pick({id}){M.pick=id;M.pin='';M.err=''},
   unpick(){M.pick=null;M.err=''},
+  skip(){M.status='home'},
+  tolink(){M.status='login';M.q='';M.pick=null;M.err=''},
+  profile(){M.showProfile=!M.showProfile},
+  copyCode(){copyText(M.uid||'')},
+  async logout(){await logOut();location.reload()},
   async claim(){
     if(!/^\d{4}$/.test(M.pin)){M.err='Enter your 4-digit PIN.';render();return}
     M.busy=true;M.err='';render();
@@ -177,8 +197,10 @@ let rosterStarted=false;
 async function afterAuth(u){
   M.uid=u.uid;
   if(!rosterStarted){rosterStarted=true;db.collection('roster').onSnapshot(s=>{M.roster=Object.fromEntries(s.docs.map(x=>[x.id,x.data().name]));if(M.status!=='loading')render()},()=>{M.status='error';render()})}
+  try{M.admin=(await db.doc('admins/'+M.uid).get()).exists}catch(e){M.admin=false}
+  if(M.admin&&NEXT==='coach'){location.replace('coach.html');return}
   const c=await db.doc('claims/'+M.uid).get();
-  if(c.exists&&c.data().memberId){M.me=c.data().memberId;M.status='home';startData()}else M.status='login';
+  if(c.exists&&c.data().memberId){M.me=c.data().memberId;M.status='home';startData()}else M.status=M.admin?'home':'login';
 }
 let dataStarted=false;
 function startData(){

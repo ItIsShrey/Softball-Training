@@ -60,7 +60,8 @@ function nextTraining(){const d=new Date();for(let i=0;i<7;i++){const x=new Date
 
 const S={db:null,user:null,pins:{},links:{},roster:{},rsvps:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
   members:[],drills:[],sessions:{},view:'plan',draft:null,dirty:false,blocksEdited:false,
-  mf:null,df:null,paste:'',pasteMsg:'',confirm:null};
+  mf:null,df:null,paste:'',pasteMsg:'',confirm:null,admins:[],exCode:'',exName:'',planDate:null,calMonth:null,calSel:null};
+S.calSel=nextTraining();S.calMonth=S.calSel.slice(0,7);
 
 function newMemberForm(){return {id:null,name:'',level:3,pos:[],gender:'',pin:newPin()}}
 function newPin(){return String(Math.floor(Math.random()*10000)).padStart(4,'0')}
@@ -139,12 +140,13 @@ function render(){
   const so=$('#signout');if(so)so.hidden=!S.user;
   if(S.status==='loading')return;
   if(S.status==='noconfig'){app.innerHTML=`<section class="card"><h2>Connect Firebase</h2><p class="muted">Paste your Firebase web config into <code>js/firebase-config.js</code> and reload. The README has the steps.</p></section>`;return}
+  if(S.status==='signin'&&telegramEnabled){location.replace('index.html?next=coach');return}
   if(S.status==='signin'){app.innerHTML=`<section class="card" style="max-width:460px"><h2>Coach sign-in</h2><p class="muted">Excos sign in here. Members use the <a href="index.html">member page</a> instead.</p>${telegramEnabled?'<div id="tg-login" style="min-height:48px"></div><p class="small muted" style="margin:0">or</p>':''}<div class="row"><button${telegramEnabled?'':' class="primary"'} data-act="signin">Sign in with Google</button></div></section>`;if(telegramEnabled)mountTelegramButton(document.getElementById('tg-login'),onTelegram);return}
-  if(S.status==='denied'){app.innerHTML=`<section class="card" style="max-width:520px"><h2>Not on the exco list</h2><p class="muted">${esc(S.user&&(S.user.email||'This Telegram account'))} can't open the coach view. Ask the owner to add a document to the <code>admins</code> collection in Firebase with this ID, then reload:</p><p><code style="font-size:15px">${esc(S.user&&(S.user.email||S.user.uid))}</code></p><div class="row"><button data-act="signout">Use another account</button></div></section>`;return}
+  if(S.status==='denied'){const code=S.user&&(S.user.email||S.user.uid);app.innerHTML=`<section class="card" style="max-width:520px"><h2>Not an exco yet</h2><p class="muted" style="margin:0">Only excos can open the planner. Send this code to an exco, who can add you under Members, then Excos.</p><div class="codebox"><code>${esc(code)}</code><button data-act="copyCode" data-code="${esc(code)}">Copy</button></div><div class="row"><a class="btnlink" href="index.html">Go to my trainings</a><button class="ghost" data-act="signout">Use another account</button></div></section>`;return}
   const a=document.activeElement,fid=a&&a.id;let sel=null;
   try{if(a&&'selectionStart' in a)sel=[a.selectionStart,a.selectionEnd]}catch(e){}
   const banner=S.readOnly?`<div class="banner">Your changes aren't being saved. Check that your email is on the exco list.</div>`:'';
-  app.innerHTML=banner+(S.view==='members'?membersHTML():S.view==='drills'?drillsHTML():planHTML());
+  app.innerHTML=banner+(S.view==='members'?membersHTML():S.view==='drills'?drillsHTML():(S.planDate&&S.draft)?planHTML():calHTML());
   if(fid){const el=document.getElementById(fid);if(el&&el!==document.activeElement){el.focus({preventScroll:true});try{if(sel&&sel[0]!=null)el.setSelectionRange(sel[0],sel[1])}catch(e){}}}
 }
 
@@ -230,14 +232,54 @@ function planHTML(){
     <div class="row"><button data-act="rebuild">${S.confirm==='rebuild'?'Tap again to replace the timeline':'Rebuild from usual drills'}</button></div>
   </section>`;
 
-  const list=Object.values(S.sessions).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,12);
-  const savedCard=`<section class="card"><h2>Saved plans</h2>${list.length?`<div class="saved">${list.map(x=>`<button data-act="open" data-date="${x.date}" aria-current="${x.date===d.date}"><span>${esc(pretty(x.date))} · ${esc(venueLabel(x.venue))}</span><span class="muted small">${(x.attendees||[]).length} coming</span></button>`).join('')}</div>`:'<p class="muted small" style="margin:0">Plans you save show up here for your captain and excos too.</p>'}</section>`;
 
   const actions=`<div class="actions"><span class="st-txt">${esc(pretty(d.date))} · ${stateTxt}${issues.length?' · <b style="color:var(--bad)">runs past the booking</b>':''}</span>
     ${saved?`<button class="ghost danger" data-act="delsess">${S.confirm==='delsess'?'Tap again to delete':'Delete'}</button>`:''}
     <button data-act="copy">Copy for Telegram</button><button class="primary" data-act="save"${S.readOnly?' disabled':''}>Save plan</button></div>`;
 
-  return `<div class="cols"><div class="stack">${session}${attend}${teams}</div><div class="stack">${timeline}${savedCard}</div></div>${gameHTML(d)}${actions}`;
+  const back=`<div class="plan-top"><button data-act="backCal">← Calendar</button><span class="muted small">${esc(pretty(d.date))}${saved?(d.published?' · members can see it':' · only excos can see it'):' · new plan'}</span></div>`;
+  return `${back}<div class="cols"><div class="stack">${session}${attend}${teams}</div><div class="stack">${timeline}</div></div>${gameHTML(d)}${actions}`;
+}
+
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function calHTML(){
+  const [y,mo]=S.calMonth.split('-').map(Number);
+  const first=new Date(y,mo-1,1),lead=(first.getDay()+6)%7,days=new Date(y,mo,0).getDate();
+  const today=iso(new Date());
+  const cells=[];for(let i=0;i<lead;i++)cells.push('<span class="cd blank"></span>');
+  for(let n=1;n<=days;n++){const date=`${y}-${String(mo).padStart(2,'0')}-${String(n).padStart(2,'0')}`;const x=S.sessions[date];const wd=dow(date);
+    const cls=['cd',x?'has':'',x&&x.published?'pub':'',(wd===3||wd===5)?'tday':'',date===today?'today':'',S.draft&&S.dirty&&S.draft.date===date?'unsaved':''].filter(Boolean).join(' ');
+    cells.push(`<button class="${cls}" data-act="calPick" data-date="${date}" aria-pressed="${S.calSel===date}" aria-label="${esc(pretty(date))}${x?', has a plan':''}"><span class="cd-n">${n}</span>${x?`<span class="cd-v">${esc(x.venue||'')}</span>`:''}</button>`)}
+  const grid=`<section class="card cal"><div class="card-h"><h2>${MONTHS[mo-1]} ${y}</h2><div class="row" style="gap:4px"><button class="ghost" data-act="calMove" data-n="-1" aria-label="Previous month">‹</button><button class="ghost" data-act="calToday">Today</button><button class="ghost" data-act="calMove" data-n="1" aria-label="Next month">›</button></div></div>
+    <div class="cal-g">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<span class="cal-h">${d}</span>`).join('')}${cells.join('')}</div>
+    <div class="cal-key small muted"><span><i class="k has"></i>Plan saved</span><span><i class="k pub"></i>Members can see it</span><span><i class="k tday"></i>Usual training day</span></div></section>`;
+  const sel=S.calSel,x=sel&&S.sessions[sel];
+  let panel;
+  if(!sel)panel='';
+  else if(x){const rv=S.rsvps[sel]||{};const yes=Object.values(rv).filter(v=>v===true).length,no=Object.values(rv).filter(v=>v===false).length;
+    panel=`<section class="card"><div class="card-h"><h2>${esc(pretty(sel))}</h2>${x.published?'<span class="pill good">Members can see it</span>':'<span class="pill warn">Only excos</span>'}</div>
+      <div class="cal-sum"><span>${esc(venueLabel(x.venue))}</span><span>${fmt(toMin(x.start))}–${fmt(toMin(x.end))}</span><span>${(x.attendees||[]).length} ticked as coming</span>${x.published?`<span>${yes} said yes · ${no} can't</span>`:''}</div>
+      <div class="row"><button class="primary" data-act="openPlan" data-date="${sel}">View plan</button></div></section>`}
+  else panel=`<section class="card"><h2>${esc(pretty(sel))}</h2><p class="muted" style="margin:0">No plan for this day yet.${(dow(sel)===3||dow(sel)===5)?'':' It isn\'t a usual training day.'}</p><div class="row"><button class="primary" data-act="openPlan" data-date="${sel}">Make a plan</button></div></section>`;
+  const today2=iso(new Date());
+  const up=Object.values(S.sessions).filter(v=>v.date>=today2).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,6);
+  const upcoming=`<section class="card"><h2>Coming up</h2>${up.length?`<div class="saved">${up.map(v=>`<button data-act="calPick" data-date="${v.date}" aria-current="${v.date===sel}"><span>${esc(pretty(v.date))} · ${esc(venueLabel(v.venue))}</span><span class="muted small">${v.published?'posted':'draft'}</span></button>`).join('')}</div>`:'<p class="muted small" style="margin:0">No upcoming plans. Pick a day on the calendar to make one.</p>'}</section>`;
+  const unsaved=S.draft&&S.dirty?`<div class="banner">You have unsaved changes on ${esc(pretty(S.draft.date))}. <button class="ghost" data-act="openPlan" data-date="${S.draft.date}">Go back to it</button></div>`:'';
+  return `${unsaved}<div class="cols"><div class="stack">${grid}</div><div class="stack">${panel}${upcoming}</div></div>`;
+}
+function adminName(a){if(a.name)return a.name;const mid=Object.keys(S.links).find(k=>S.links[k]===a.id);const m=mid&&S.members.find(m=>m.id===mid);return m?m.name:''}
+function excosHTML(){
+  const me=S.user&&S.user.uid,myEmail=S.user&&S.user.email;
+  const ids=new Set(S.admins.map(a=>a.id));
+  const linked=Object.entries(S.links).filter(([,tg])=>!ids.has(tg)).map(([mid,tg])=>({tg,m:S.members.find(m=>m.id===mid)})).filter(x=>x.m).sort((a,b)=>a.m.name.localeCompare(b.m.name));
+  return `<section class="card"><h2>Excos</h2><p class="small muted" style="margin:0">Excos can open this planner. Everyone's code is on their profile in the member view.</p>
+    <div class="list">${S.admins.map(a=>{const self=a.id===me||a.id===myEmail;const n=adminName(a);return `<div class="li"><div><div class="nm">${esc(n||'No name')}${self?' <span class="muted small">(you)</span>':''}</div><div class="small muted" style="font-family:var(--mono)">${esc(a.id)}</div></div>
+      ${self?'':`<button class="ghost danger" data-act="exDel" data-id="${esc(a.id)}">${S.confirm==='ex'+a.id?'Tap again':'Remove'}</button>`}</div>`}).join('')}</div>
+    <div class="g2"><label class="f">Their code<input id="ex-code" data-input="exCode" value="${esc(S.exCode)}" placeholder="tg:123456789" autocomplete="off" spellcheck="false"></label>
+      <label class="f">Name (optional)<input id="ex-name" data-input="exName" value="${esc(S.exName)}" placeholder="e.g. Captain" autocomplete="off"></label></div>
+    <div class="row"><button class="primary" data-act="exAdd"${S.readOnly?' disabled':''}>Add exco</button>
+      ${linked.length?`<select id="ex-pick" data-ex-pick="1" aria-label="Add a member who has logged in"><option value="">Or pick a member who has logged in…</option>${linked.map(x=>`<option value="${esc(x.tg)}">${esc(x.m.name)}</option>`).join('')}</select>`:''}</div>
+  </section>`;
 }
 
 function gCount(r){const f=r.filter(m=>m.gender==='F').length,m=r.filter(m=>m.gender==='M').length;return (f||m)?` · ${f}F ${m}M`:''}
@@ -277,7 +319,7 @@ function membersHTML(){
   const nopin=ms.filter(m=>!S.pins[m.id]).length;
   const pins=ms.length?`<section class="card"><div class="card-h"><h2>Member PINs</h2><div class="row">${nopin?`<button data-act="pinsAll">Give PINs to ${nopin} without one</button>`:''}<button data-act="pinsCopy">Copy PIN list</button></div></div><p class="small muted" style="margin:0">Members sign in on the member page with their name and PIN. Send each person their own PIN.</p></section>`
     :`<section class="card"><h2>Import roster</h2><p class="small muted" style="margin:0">Load the backup file with your members and drills to get started.</p><input type="file" id="import-file" accept="application/json,.json"></section>`;
-  return `<div class="cols"><div class="stack">${form}${pins}</div><div class="stack">${summary}${list}</div></div>`;
+  return `<div class="cols"><div class="stack">${form}${pins}${excosHTML()}</div><div class="stack">${summary}${list}</div></div>`;
 }
 
 function drillsHTML(){
@@ -478,7 +520,18 @@ const A={
   addrot(){const b=S.draft.blocks;const nb={id:rid(),kind:'rotation',name:'Station rotation',per:20,stations:[]};const tailIdx=b.findIndex(y=>y.category==='admin');if(tailIdx>=0)b.splice(tailIdx,0,nb);else b.push(nb);S.blocksEdited=true;markDirty()},
   stdel({i,j}){S.draft.blocks[+i].stations.splice(+j,1);S.blocksEdited=true;markDirty()},
   rebuild(){if(!armConfirm('rebuild'))return;S.draft.blocks=autoBlocks(S.draft);S.blocksEdited=false;markDirty()},
-  open({date}){S.draft=loadDraft(date)},
+  open({date}){location.hash='plan/'+date},
+  calPick({date}){S.calSel=date;S.calMonth=date.slice(0,7)},
+  calMove({n}){const [y,m]=S.calMonth.split('-').map(Number);const d=new Date(y,m-1+(+n),1);S.calMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`},
+  calToday(){const t=iso(new Date());S.calMonth=t.slice(0,7);S.calSel=t},
+  openPlan({date}){location.hash='plan/'+date},
+  backCal(){if(S.draft)S.calSel=S.draft.date;location.hash='plan'},
+  copyCode({code}){copyText(code,'Code copied')},
+  async exAdd(){const code=S.exCode.trim();
+    if(!/^tg:\d{3,}$/.test(code)&&!/^[^@\s/]+@[^@\s/]+\.[^@\s/]+$/.test(code))return toast('Paste their code, which looks like tg:123456789.');
+    if(S.admins.some(a=>a.id===code))return toast("They're already an exco.");
+    if(await write(()=>S.db.doc('admins/'+code).set({name:S.exName.trim(),addedBy:S.user.uid,at:new Date().toISOString()}),'Exco added')){S.exCode='';S.exName='';render()}},
+  async exDel({id}){if(!armConfirm('ex'+id))return;await write(()=>S.db.doc('admins/'+id).delete(),'Exco removed');render()},
   async save(){const d=clone(S.draft);d.updatedAt=new Date().toISOString();if(await write(()=>S.db.doc('sessions/'+d.date).set(d),'Plan saved')){S.dirty=false;S.blocksEdited=true;render()}},
   async delsess(){if(!armConfirm('delsess'))return;const date=S.draft.date;if(await write(()=>S.db.doc('sessions/'+date).delete(),'Plan deleted')){S.dirty=true;render()}},
   copy(){const txt=planText();const done=()=>toast('Plan copied. Paste it into the group chat.');
@@ -523,15 +576,17 @@ document.addEventListener('input',e=>{
   const k=e.target.dataset.input;if(!k)return;
   if(k==='attQ'){S.attQ=e.target.value;render();return}
   if(k==='paste')S.paste=e.target.value;
+  else if(k==='exCode'||k==='exName')S[k]=e.target.value;
   else{const [o,f]=k.split('.');S[o][f]=e.target.value}
 });
 document.addEventListener('change',e=>{
   const el=e.target,d=S.draft;
   if(el.dataset.fb){d[el.dataset.fb]=el.checked;if(el.dataset.fb==='published'&&!el.checked)d.teamsVisible=false;markDirty();render();return}
   if(el.id==='import-file'&&el.files[0]){importBackup(el.files[0]);return}
+  if(el.dataset.exPick){const tg=el.value;if(tg){const mid=Object.keys(S.links).find(k=>S.links[k]===tg);const m=S.members.find(m=>m.id===mid);S.exCode=tg;S.exName=m?m.name:''}render();return}
   if(el.dataset.f==='evenGender'){d.evenGender=el.checked;balanceTeams(d);markDirty();render();return}
   if(el.dataset.f){const k=el.dataset.f,v=el.value;if(!v)return;
-    if(k==='date'){S.draft=loadDraft(v)}
+    if(k==='date'){history.replaceState(null,'','#plan/'+v);S.planDate=v;S.calSel=v;S.calMonth=v.slice(0,7);S.draft=loadDraft(v)}
     else{d[k]=v;if(k==='venue'){const want=venueKind(v)==='MPSH'?3:2;if(!S.blocksEdited){d.numTeams=want;balanceTeams(d)}}
       if(!S.blocksEdited)d.blocks=autoBlocks(d);markDirty()}
     render();return}
@@ -542,16 +597,23 @@ document.addEventListener('change',e=>{
   if(el.dataset.dchange){const k=el.dataset.dchange;S.df[k]=el.type==='checkbox'?el.checked:el.value;return}
 });
 
-function route(){const h=location.hash.slice(1);S.view=['plan','members','drills'].includes(h)?h:'plan';S.sel=null;render()}
+function route(){const [v,date]=location.hash.slice(1).split('/');S.view=['plan','members','drills'].includes(v)?v:'plan';
+  S.planDate=S.view==='plan'&&/^\d{4}-\d{2}-\d{2}$/.test(date||'')?date:null;S.sel=null;S.confirm=null;
+  if(S.planDate){S.calSel=S.planDate;S.calMonth=S.planDate.slice(0,7);syncDraft()}
+  render();if(S.planDate)scrollTo({top:0})}
+const dataReady=()=>S.ready.m&&S.ready.d&&S.ready.s;
+function syncDraft(){if(S.planDate&&dataReady()&&(!S.draft||S.draft.date!==S.planDate))S.draft=loadDraft(S.planDate)}
 window.addEventListener('hashchange',route);
 
 function afterData(){
   if(!(S.ready.m&&S.ready.d&&S.ready.s))return;
-  if(!S.draft)S.draft=loadDraft(nextTraining());
-  else if(!S.dirty&&S.sessions[S.draft.date])S.draft=loadDraft(S.draft.date);
-  else if(!S.dirty&&!S.blocksEdited&&!S.sessions[S.draft.date])S.draft.blocks=autoBlocks(S.draft);
-  // drop attendees whose member was deleted
-  S.draft.attendees=S.draft.attendees.filter(id=>S.members.some(m=>m.id===id));
+  syncDraft();
+  if(S.draft){
+    if(!S.dirty&&S.sessions[S.draft.date])S.draft=loadDraft(S.draft.date);
+    else if(!S.dirty&&!S.blocksEdited&&!S.sessions[S.draft.date])S.draft.blocks=autoBlocks(S.draft);
+    // drop attendees whose member was deleted
+    S.draft.attendees=S.draft.attendees.filter(id=>S.members.some(m=>m.id===id));
+  }
   S.status='ok';render();
 }
 
@@ -577,6 +639,7 @@ function start(){
   db.collection('memberPins').onSnapshot(s=>{S.pins=Object.fromEntries(s.docs.map(x=>[x.id,x.data().pin]));if(S.status==='ok')render()},fail);
   db.collection('roster').onSnapshot(s=>{S.roster=Object.fromEntries(s.docs.map(x=>[x.id,x.data().name]));S.ready.r=1;syncRoster()},fail);
   db.collection('claims').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();if(x.id.startsWith('tg:'))o[v.memberId]=x.id});S.links=o;if(S.status==='ok')render()},()=>{});
+  db.collection('admins').onSnapshot(s=>{S.admins=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>(adminName(a)||a.id).localeCompare(adminName(b)||b.id));if(S.status==='ok')render()},()=>{});
   db.collection('rsvps').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]=v.going});S.rsvps=o;if(S.status==='ok')render()},fail);
 }
 (async()=>{
