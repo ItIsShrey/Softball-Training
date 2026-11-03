@@ -16,13 +16,18 @@ main.member{max-width:560px}
 .who button{text-align:left;padding:12px 14px;font-size:16px;font-weight:500}
 .who button[aria-pressed="true"]{background:var(--field);border-color:var(--field);color:var(--field-ink)}
 input.big{font-size:18px;padding:12px 14px}
-.pinbox{letter-spacing:.5em;font-family:var(--mono);text-align:center;max-width:180px}
 .tr-date{font-family:var(--display);font-weight:700;font-size:28px;line-height:1;text-transform:uppercase}
 .tr-meta{display:flex;gap:6px 14px;flex-wrap:wrap;color:var(--muted);font-size:14px}
 .rsvp{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .rsvp button{padding:14px 10px;font-size:16px;border-radius:10px;border-width:2px}
 .rsvp .y[aria-pressed="true"]{background:var(--good);border-color:var(--good);color:var(--surface)}
 .rsvp .n[aria-pressed="true"]{background:var(--bad);border-color:var(--bad);color:var(--surface)}
+.rsvp2{display:flex;gap:8px;flex-wrap:wrap}
+.rsvp2 button{flex:1;padding:9px 10px;font-size:14px}
+.rsvp2 button[aria-pressed="true"]{background:color-mix(in srgb,var(--warn) 18%,var(--surface));border-color:var(--warn)}
+.rform{display:grid;gap:10px;padding:12px;border-radius:10px;background:var(--sunk);border:1px solid var(--line)}
+.rform .g{display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px}
+.mynote{font-size:14px;color:var(--muted)}
 .myteam{border-radius:10px;padding:12px;display:grid;gap:8px;background:var(--sunk);border:1px solid var(--line);border-left:5px solid var(--tc)}
 .myteam.t0{border-left-color:var(--ta)} .myteam.t1{border-left-color:var(--tb)}
 .big-line{font-size:17px;font-weight:700}
@@ -42,7 +47,7 @@ input.big{font-size:18px;padding:12px 14px}
 <div class="toast" id="toast" hidden></div>
 
 <script type="module">
-import { db, auth, configured, currentUser, signInGuest, logOut, telegramEnabled, signInTelegram, mountTelegramButton, telegramProfile } from './js/store.js';
+import { db, auth, configured, currentUser, logOut, telegramEnabled, signInTelegram, mountTelegramButton, telegramProfile, notifyExcos } from './js/store.js';
 
 const VENUES={MPSH:'MPSH (hall)',Kallang:'Kallang field',Jurong:'Jurong field'};
 const TEAM=['A','B','C'];
@@ -59,7 +64,7 @@ const firstName=n=>{n=String(n||'');if(n.includes(','))return n.split(',')[1].tr
 const norm=s=>String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();
 
 const NEXT=new URLSearchParams(location.search).get('next');
-const M={admin:false,showProfile:false,req:null,uid:null,me:null,roster:{},sessions:[],rsvps:{},q:'',pick:null,pin:'',err:'',busy:false,open:{}};
+const M={admin:false,showProfile:false,req:null,uid:null,me:null,roster:{},sessions:[],rsvps:{},q:'',pick:null,err:'',busy:false,open:{},form:null};
 function copyText(txt){const done=()=>toast('Code copied');
   const fallback=()=>{const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}ta.remove();ok?done():toast("Couldn't copy. Press and hold the code to copy it.")};
   try{navigator.clipboard.writeText(txt).then(done,fallback)}catch(e){fallback()}}
@@ -88,7 +93,7 @@ function tgLoginHTML(){
 async function onTelegram(user){
   M.status='loading';render();
   try{const u=await signInTelegram(user);await afterAuth(u)}
-  catch(e){M.err="Telegram login didn't go through. Try again.";M.status='tglogin'}
+  catch(e){M.err=e&&e.message==='not_in_group'?"This page is for SMU Softball members. Log in with the Telegram account you use in the club group, or ask an exco to add you to the group.":"Telegram login didn't go through. Try again.";M.status='tglogin'}
   render();
 }
 function loginHTML(){
@@ -96,24 +101,14 @@ function loginHTML(){
   const q=norm(M.q);
   const hits=q?names.filter(([,n])=>norm(n).includes(q)).slice(0,8):[];
   const picked=M.pick&&M.roster[M.pick];
-  if(telegramEnabled&&M.req){const n=M.roster[M.req.memberId]||'';
+  if(M.req){const n=M.roster[M.req.memberId]||'';
     return `<section class="card"><h2>Waiting for an exco</h2><p class="muted" style="margin:0">You asked to be linked as <b>${esc(n)}</b>. An exco will confirm it, and this page will update by itself. You only do this once.</p>
       <div class="row"><button class="ghost" data-act="cancelReq">That's not my name</button></div></section>${profileHTML()}`}
-  if(telegramEnabled)return `<section class="card"><h2>Who are you?</h2>
+  return `<section class="card"><h2>Who are you?</h2>
     <p class="muted" style="margin:0">One last step: find your name on the team list. An exco will confirm it's you, and you only do this once.</p>
     ${picked?`<div class="who"><button aria-pressed="true" data-act="unpick">${esc(picked)} <span class="small" style="float:right;opacity:.8">Change</span></button></div>
       ${M.err?`<div class="banner bad">${esc(M.err)}</div>`:''}
       <button class="primary" data-act="request" style="padding:12px;font-size:16px"${M.busy?' disabled':''}>${M.busy?'Sending…':"That's me"}</button>`
-    :`<label class="f">Your name<input class="big" id="q" data-input="q" value="${esc(M.q)}" placeholder="Start typing your name" autocomplete="off"></label>
-      <div class="who">${hits.map(([id,n])=>`<button data-act="pick" data-id="${esc(id)}">${esc(n)}</button>`).join('')||(q?'<p class="small muted" style="margin:0">No one by that name. Ask an exco to add you.</p>':'')}</div>`}
-    ${M.admin?'<div class="row"><button class="ghost" data-act="skip">Skip for now</button></div>':''}
-  </section>${profileHTML()}`;
-  return `<section class="card"><h2>Who are you?</h2>
-    <p class="muted" style="margin:0">Find your name, then enter the 4-digit PIN your exco sent you. You only need to do this once on this phone.</p>
-    ${picked?`<div class="who"><button aria-pressed="true" data-act="unpick">${esc(picked)} <span class="small" style="float:right;opacity:.8">Change</span></button></div>
-      <label class="f">PIN<input class="big pinbox" id="pin" data-input="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="4" value="${esc(M.pin)}"></label>
-      ${M.err?`<div class="banner bad">${esc(M.err)}</div>`:''}
-      <button class="primary" data-act="claim" style="padding:12px;font-size:16px"${M.busy?' disabled':''}>${M.busy?'Checking…':'Continue'}</button>`
     :`<label class="f">Your name<input class="big" id="q" data-input="q" value="${esc(M.q)}" placeholder="Start typing your name" autocomplete="off"></label>
       <div class="who">${hits.map(([id,n])=>`<button data-act="pick" data-id="${esc(id)}">${esc(n)}</button>`).join('')||(q?'<p class="small muted" style="margin:0">No one by that name. Ask an exco to add you.</p>':'')}</div>`}
     ${M.admin?'<div class="row"><button class="ghost" data-act="skip">Skip for now</button></div>':''}
@@ -124,14 +119,16 @@ function profileHTML(){
   return `<section class="card"><h2>Your profile</h2>
     ${M.me?`<div class="row" style="justify-content:space-between"><span>${esc(M.roster[M.me]||'')}</span><button class="ghost" data-act="switch">Not you?</button></div>`:''}
     <div style="display:grid;gap:6px"><span class="eyebrow">Your code</span><div class="codebox"><code>${esc(M.uid||'')}</code><button data-act="copyCode">Copy</button></div>
-    <span class="small muted">${M.admin?"You're an exco, so you can open the coach view.":"Excos: send this code to the club's exco so they can give you access to the planner."}</span></div>
+    <span class="small muted">${M.admin?"You're an exco, so you can open the coach view.":"Excos: send this code to the club owner so they can give you access to the planner."}</span></div>
     ${M.me?'':'<div class="row"><button class="ghost" data-act="logout">Log out</button></div>'}</section>`;
 }
-function myRsvp(date){return (M.rsvps[date]||{})[M.me]}
+function myRsvp(date){return (M.rsvps[date]||{})[M.me]||null}
 function trainingHTML(x){
   const start=toMin(x.start),end=toMin(x.end);
-  const rv=M.rsvps[x.date]||{};const yes=Object.keys(rv).filter(id=>rv[id]===true&&M.roster[id]);const no=Object.keys(rv).filter(id=>rv[id]===false).length;
-  const mine=myRsvp(x.date);
+  const rv=M.rsvps[x.date]||{};const yes=Object.keys(rv).filter(id=>rv[id].going&&M.roster[id]);const no=Object.keys(rv).filter(id=>!rv[id].going).length;
+  const late=yes.filter(id=>rv[id].status!=='yes').length;
+  const mine=myRsvp(x.date),st=mine&&mine.status,going=!!(mine&&mine.going);
+  const f=M.form&&M.form.date===x.date?M.form:null;
   const team=x.teamsVisible&&(x.attendees||[]).includes(M.me)?(x.teams||{})[M.me]:null;
   let teamBox='';
   if(x.teamsVisible){
@@ -159,27 +156,41 @@ function trainingHTML(x){
     <div><div class="tr-date">${esc(pretty(x.date))}</div>
     <div class="tr-meta"><span>${esc(VENUES[x.venue]||x.venue)}</span><span>${fmt(start)}–${fmt(end)}pm</span></div></div>
     <div class="rsvp" role="group" aria-label="Are you coming?">
-      <button class="y" data-act="rsvp" data-date="${x.date}" data-v="1" aria-pressed="${mine===true}">${mine===true?'✓ ':''}I'm coming</button>
-      <button class="n" data-act="rsvp" data-date="${x.date}" data-v="0" aria-pressed="${mine===false}">${mine===false?'✕ ':''}Can't make it</button>
+      <button class="y" data-act="rsvp" data-date="${x.date}" data-s="yes" aria-pressed="${going}">${going?'✓ ':''}I'm coming</button>
+      <button class="n" data-act="rsvp" data-date="${x.date}" data-s="no" aria-pressed="${st==='no'}">${st==='no'?'✕ ':''}Can't make it</button>
     </div>
-    <details${M.open[x.date]?' open':''} data-open="${x.date}"><summary>${yes.length} coming · ${no} can't</summary>
-      <div class="names" style="margin-top:6px">${yes.map(id=>esc(firstName(M.roster[id]))).sort().join(' · ')||'<span class="muted">Nobody yet</span>'}</div></details>
+    ${going?`<div class="rsvp2" role="group" aria-label="Coming for part of it?"><button data-act="rsvp" data-date="${x.date}" data-s="late" aria-pressed="${st==='late'}">Coming late</button><button data-act="rsvp" data-date="${x.date}" data-s="early" aria-pressed="${st==='early'}">Leaving early</button></div>`:''}
+    ${f?replyFormHTML(x,f):mine&&(mine.reason||mine.time)&&st!=='yes'?`<div class="mynote">${esc(STATUS[st])}${mine.time?`, ${st==='late'?'arriving':'leaving'} ${fmt(toMin(mine.time))}`:''}${mine.reason?` · ${esc(mine.reason)}`:''} <button class="ghost" data-act="rsvp" data-date="${x.date}" data-s="${st}" style="padding:2px 8px;font-size:13px">Change</button></div>`:''}
+    <details${M.open[x.date]?' open':''} data-open="${x.date}"><summary>${yes.length} coming${late?` (${late} late or leaving early)`:''} · ${no} can't</summary>
+      <div class="names" style="margin-top:6px">${yes.map(id=>esc(firstName(M.roster[id]))+(rv[id].status==='late'?' (late)':rv[id].status==='early'?' (leaving early)':'')).sort().join(' · ')||'<span class="muted">Nobody yet</span>'}</div></details>
     ${teamBox}
     ${rows?`<details><summary>Training plan</summary><div>${rows}</div></details>`:''}
   </section>`;
 }
 
+const STATUS={yes:'Coming',late:'Coming late',early:'Leaving early',no:"Can't make it"};
+// Asks for a reason when coming late, leaving early, or changing a yes to a no.
+function replyFormHTML(x,f){
+  const q=f.status==='late'?'Coming late':f.status==='early'?'Leaving early':'Changing to a no';
+  return `<div class="rform"><b>${q}</b>
+    <div class="g">${f.status==='no'?'':`<label class="f">${f.status==='late'?'Arriving at':'Leaving at'}<input type="time" id="rf-time" data-input="form.time" value="${esc(f.time||'')}" step="300"></label>`}
+      <label class="f" style="${f.status==='no'?'grid-column:1/-1':''}">Reason<input id="rf-reason" data-input="form.reason" value="${esc(f.reason||'')}" maxlength="200" placeholder="${f.status==='no'?'e.g. fell sick':'e.g. class until 4'}" autocomplete="off"></label></div>
+    ${M.err?`<div class="banner bad">${esc(M.err)}</div>`:''}
+    <div class="row"><button class="primary" data-act="rsSave"${M.busy?' disabled':''}>${M.busy?'Saving…':'Save'}</button><button class="ghost" data-act="rsCancel">Cancel</button></div></div>`;
+}
+function startsAt(date){const x=M.sessions.find(s=>s.date===date);return new Date(date+'T'+((x&&x.start)||'15:30')+':00').getTime()}
+
 function homeHTML(){
   const today=iso(new Date());
   const up=M.sessions.filter(x=>x.date>=today).sort((a,b)=>a.date.localeCompare(b.date));
   const bar=`<div class="me-bar"><span>Hi${M.me?` <b>${esc(firstName(M.roster[M.me]||''))}</b>`:''}</span><div class="row">${M.admin?'<a class="btnlink" href="coach.html">Coach view</a>':''}<button class="ghost" data-act="profile" aria-expanded="${M.showProfile}">Profile</button></div></div>${M.showProfile?profileHTML():''}`;
-  if(!M.me)return bar+`<section class="card"><h2>Link your name</h2><p class="muted" style="margin:0">To reply to trainings, ${telegramEnabled?'find your name and an exco will confirm it':'find your name and enter the PIN from your exco'}. You only do this once.</p><div class="row"><button class="primary" data-act="tolink">Find my name</button></div></section>`;
+  if(!M.me)return bar+`<section class="card"><h2>Link your name</h2><p class="muted" style="margin:0">To reply to trainings, find your name and an exco will confirm it. You only do this once.</p><div class="row"><button class="primary" data-act="tolink">Find my name</button></div></section>`;
   return `${bar}
     ${up.length?up.map(trainingHTML).join(''):`<section class="card"><h2>No trainings posted</h2><p class="muted" style="margin:0">When the excos post the next training, it'll show here and you can reply.</p></section>`}`;
 }
 
 const A={
-  pick({id}){M.pick=id;M.pin='';M.err=''},
+  pick({id}){M.pick=id;M.err=''},
   unpick(){M.pick=null;M.err=''},
   skip(){M.status='home'},
   tolink(){M.status='login';M.q='';M.pick=null;M.err=''},
@@ -193,26 +204,36 @@ const A={
     M.busy=false;render();
   },
   async cancelReq(){try{await db.doc('linkRequests/'+M.uid).delete()}catch(e){}M.req=null;M.pick=null;M.q='';render()},
-  async claim(){
-    if(!/^\d{4}$/.test(M.pin)){M.err='Enter your 4-digit PIN.';render();return}
-    M.busy=true;M.err='';render();
-    try{await db.doc('claims/'+M.uid).set({memberId:M.pick,pin:M.pin});M.me=M.pick;M.status='home';startData()}
-    catch(e){M.err=e&&e.code==='permission-denied'?"That PIN doesn't match. Check the message from your exco.":"Couldn't check your PIN. Try again."}
-    M.busy=false;render();
+  async switch(){try{await db.doc('claims/'+M.uid).delete()}catch(e){}M.me=null;M.pick=null;await logOut();location.reload()},
+  rsvp({date,s:status}){
+    const cur=myRsvp(date);M.err='';
+    if(status==='late'||status==='early'){M.form={date,status,time:cur&&cur.status===status?cur.time||'':'',reason:cur&&cur.status===status?cur.reason||'':''};return}
+    if(status==='no'&&cur&&cur.going){M.form={date,status,reason:''};return}
+    M.form=null;if(cur&&cur.status===status)return;
+    return saveReply(date,status,'','');
   },
-  async switch(){try{await db.doc('claims/'+M.uid).delete()}catch(e){}M.me=null;M.pick=null;M.pin='';if(telegramEnabled){await logOut();location.reload();return}M.status='login';render()},
-  async rsvp({date,v}){
-    const going=v==='1';if(myRsvp(date)===going)return;
-    (M.rsvps[date]=M.rsvps[date]||{})[M.me]=going;render();
-    try{await db.doc('rsvps/'+date+'_'+M.me).set({date,memberId:M.me,going,uid:M.uid,at:new Date().toISOString()});toast(going?"You're down as coming":"Thanks for letting us know")}
-    catch(e){toast("Couldn't save your reply. Try again.")}
-  },
+  rsCancel(){M.form=null;M.err=''},
+  rsSave(){const f=M.form;if(!f)return;const reason=String(f.reason||'').trim();
+    if(!reason){M.err=f.status==='no'?'Let the excos know why you can no longer make it.':'Add a reason so the excos can plan around it.';return}
+    return saveReply(f.date,f.status,f.time||'',reason)},
 };
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el||el.disabled)return;const r=A[el.dataset.act](el.dataset);if(!(r instanceof Promise))render()});
-document.addEventListener('input',e=>{const k=e.target.dataset.input;if(!k)return;M[k]=e.target.value;if(k==='q')render();if(k==='pin'&&/^\d{4}$/.test(M.pin))A.claim()});
+document.addEventListener('input',e=>{const k=e.target.dataset.input;if(!k)return;const [a,b]=k.split('.');if(b){if(M[a])M[a][b]=e.target.value}else M[k]=e.target.value;if(k==='q')render()});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='q'){const first=document.querySelector('.who button');if(first)first.click()}});
 document.addEventListener('toggle',e=>{const d=e.target.dataset&&e.target.dataset.open;if(d)M.open[d]=e.target.open},true);
 
+async function saveReply(date,status,time,reason){
+  const cur=myRsvp(date);
+  const d={date,memberId:M.me,going:status!=='no',status,uid:M.uid,at:new Date().toISOString()};
+  if(time&&status!=='no'&&status!=='yes')d.time=time;if(reason)d.reason=reason.slice(0,200);
+  const prev=cur?(cur.status===status?cur.prev||'':cur.status):'';if(prev)d.prev=prev;
+  M.busy=true;render();
+  try{await db.doc('rsvps/'+date+'_'+M.me).set(d);(M.rsvps[date]=M.rsvps[date]||{})[M.me]=d;M.form=null;M.err='';
+    toast(status==='no'?'Thanks for letting us know':status==='yes'?"You're down as coming":"Saved. The excos can see it");
+    const t=startsAt(date),now=Date.now();if(t-now<24*3600e3&&now<t+3*3600e3&&(status!=='yes'||prev))notifyExcos(date,M.me)}
+  catch(e){M.err="Couldn't save your reply. Try again.";if(!M.form)toast(M.err)}
+  M.busy=false;render();
+}
 let rosterStarted=false;
 async function afterAuth(u){
   M.uid=u.uid;
@@ -221,7 +242,7 @@ async function afterAuth(u){
   if(M.admin&&NEXT==='coach'){location.replace('coach.html');return}
   const c=await db.doc('claims/'+M.uid).get();
   if(c.exists&&c.data().memberId){M.me=c.data().memberId;M.status='home';startData()}else M.status=M.admin?'home':'login';
-  if(telegramEnabled&&!M.me){await autoLink();if(!M.me)watchLink()}
+  if(!M.me){await autoLink();if(!M.me)watchLink()}
 }
 // If an exco recorded this login's @username on a member, link straight away.
 async function autoLink(){
@@ -242,15 +263,14 @@ function startData(){
   const today=iso(new Date());
   const fail=()=>{M.status='error';render()};
   db.collection('sessions').where('published','==',true).onSnapshot(s=>{M.sessions=s.docs.map(x=>({...x.data(),date:x.id}));render()},fail);
-  db.collection('rsvps').where('date','>=',today).onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]=v.going});M.rsvps=o;render()},fail);
+  db.collection('rsvps').where('date','>=',today).onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]={...v,status:v.status||(v.going?'yes':'no')}});M.rsvps=o;render()},fail);
 }
 
 (async()=>{
   if(!configured){M.status='noconfig';render();return}
   try{
     let u=await currentUser();
-    if(telegramEnabled){if(!u||u.isAnonymous){M.status='tglogin';render();return}}
-    else if(!u){await signInGuest();u=auth.currentUser}
+    if(!u||!u.uid.startsWith('tg:')){if(u)await logOut();M.status='tglogin';render();return}
     await afterAuth(u);
   }catch(e){M.status='error'}
   render();

@@ -24,8 +24,7 @@
 <div class="toast" id="toast" hidden></div>
 
 <script type="module">
-import { db, auth, configured, currentUser, signInGoogle, logOut, telegramEnabled, signInTelegram, mountTelegramButton } from './js/store.js';
-async function onTelegram(user){try{await signInTelegram(user);S.user=auth.currentUser;start()}catch(e){toast("Telegram login didn't go through. Try again.")}}
+import { db, auth, configured, currentUser, logOut, telegramEnabled, owner } from './js/store.js';
 const VENUES=[{id:'MPSH',label:'MPSH (hall)',kind:'MPSH',from:'15:30',to:'18:00'},{id:'Kallang',label:'Kallang field',kind:'Field',from:'15:30',to:'18:00'},{id:'Jurong',label:'Jurong field',kind:'Field',from:'15:30',to:'18:00'}];
 const venueOf=id=>VENUES.find(v=>v.id===id)||VENUES[0];
 /* problems with the venue's booked slot, as sentences */
@@ -58,15 +57,14 @@ const byOrder=(a,b)=>(a.order??0)-(b.order??0)||String(a.name).localeCompare(b.n
 
 function nextTraining(){const d=new Date();for(let i=0;i<7;i++){const x=new Date(d);x.setDate(d.getDate()+i);if(x.getDay()===3||x.getDay()===5)return iso(x)}return iso(d)}
 
-const S={db:null,user:null,pins:{},links:{},roster:{},rsvps:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
+const S={db:null,user:null,links:{},roster:{},rsvps:{},rinfo:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
   members:[],drills:[],sessions:{},view:'plan',draft:null,dirty:false,blocksEdited:false,
   mf:null,df:null,paste:'',pasteMsg:'',confirm:null,admins:[],reqs:[],exCode:'',exName:'',planDate:null,calMonth:null,calSel:null};
 S.calSel=nextTraining();S.calMonth=S.calSel.slice(0,7);
 
-function newMemberForm(){return {id:null,name:'',level:3,pos:[],gender:'',tg:'',pin:telegramEnabled?'':newPin()}}
+function newMemberForm(){return {id:null,name:'',level:3,pos:[],gender:'',tg:''}}
 const tgNorm=s=>String(s||'').trim().replace(/^@/,'').replace(/^https?:\/\/t\.me\//i,'').toLowerCase();
 const tgOk=u=>/^[a-z0-9_]{4,32}$/.test(u);
-function newPin(){return String(Math.floor(Math.random()*10000)).padStart(4,'0')}
 function newDrillForm(){return {id:null,name:'',minutes:15,category:'fielding',venues:['MPSH','Field'],station:false,auto:true,notes:''}}
 S.mf=newMemberForm();S.df=newDrillForm();
 
@@ -143,9 +141,8 @@ function render(){
   const so=$('#signout');if(so)so.hidden=!S.user;
   if(S.status==='loading')return;
   if(S.status==='noconfig'){app.innerHTML=`<section class="card"><h2>Connect Firebase</h2><p class="muted">Paste your Firebase web config into <code>js/firebase-config.js</code> and reload. The README has the steps.</p></section>`;return}
-  if(S.status==='signin'&&telegramEnabled){location.replace('index.html?next=coach');return}
-  if(S.status==='signin'){app.innerHTML=`<section class="card" style="max-width:460px"><h2>Coach sign-in</h2><p class="muted">Excos sign in here. Members use the <a href="index.html">member page</a> instead.</p>${telegramEnabled?'<div id="tg-login" style="min-height:48px"></div><p class="small muted" style="margin:0">or</p>':''}<div class="row"><button${telegramEnabled?'':' class="primary"'} data-act="signin">Sign in with Google</button></div></section>`;if(telegramEnabled)mountTelegramButton(document.getElementById('tg-login'),onTelegram);return}
-  if(S.status==='denied'){const code=S.user&&(S.user.email||S.user.uid);app.innerHTML=`<section class="card" style="max-width:520px"><h2>Not an exco yet</h2><p class="muted" style="margin:0">Only excos can open the planner. Send this code to an exco, who can add you under Members, then Excos.</p><div class="codebox"><code>${esc(code)}</code><button data-act="copyCode" data-code="${esc(code)}">Copy</button></div><div class="row"><a class="btnlink" href="index.html">Go to my trainings</a><button class="ghost" data-act="signout">Use another account</button></div></section>`;return}
+  if(S.status==='signin'){location.replace('index.html?next=coach');return}
+  if(S.status==='denied'){const code=S.user&&S.user.uid;app.innerHTML=`<section class="card" style="max-width:520px"><h2>Not an exco yet</h2><p class="muted" style="margin:0">Only excos can open the planner. Send this code to the club owner, who can add you under Members, then Excos.</p><div class="codebox"><code>${esc(code)}</code><button data-act="copyCode" data-code="${esc(code)}">Copy</button></div><div class="row"><a class="btnlink" href="index.html">Go to my trainings</a><button class="ghost" data-act="signout">Use another account</button></div></section>`;return}
   const a=document.activeElement,fid=a&&a.id;let sel=null;
   try{if(a&&'selectionStart' in a)sel=[a.selectionStart,a.selectionEnd]}catch(e){}
   const banner=S.readOnly?`<div class="banner">Your changes aren't being saved. Check that your email is on the exco list.</div>`:'';
@@ -187,8 +184,8 @@ function planHTML(){
     attend=`<section class="card"><div class="card-h"><h2>Attendance</h2><div class="row" style="gap:4px"><span class="muted small">${ppl.length} of ${list.length} coming</span><button class="ghost" data-act="all">All in</button><button class="ghost" data-act="none">Clear</button></div></div>
       ${rsvpSummary(d,list)}
       <div class="att-bar"><input id="att-q" data-input="attQ" value="${esc(S.attQ||'')}" placeholder="Find a player" autocomplete="off" aria-label="Find a player">
-        <div class="seg" role="group" aria-label="Show">${[['coming','Coming',ppl.length],['yes','Said yes',list.filter(m=>(S.rsvps[d.date]||{})[m.id]===true).length],['all','All',list.length]].map(([k,l,n])=>`<button data-act="attF" data-v="${k}" aria-pressed="${!q&&af===k}">${l} <span class="muted">${n}</span></button>`).join('')}</div></div>
-      <div class="chips att">${shown.map(m=>{const rv=(S.rsvps[d.date]||{})[m.id];return `<button class="chip" data-act="toggle" data-id="${esc(m.id)}" aria-pressed="${d.attendees.includes(m.id)}">${rv===true?'<span class="rs yes" title="Replied yes">✓</span>':rv===false?'<span class="rs no" title="Replied no">✕</span>':''}${esc(m.name)}<span class="lvl">L${m.level||'?'}</span></button>`}).join('')}</div>
+        <div class="seg" role="group" aria-label="Show">${[['coming','Coming',ppl.length],['yes','Replied coming',list.filter(m=>(S.rsvps[d.date]||{})[m.id]===true).length],['all','All',list.length]].map(([k,l,n])=>`<button data-act="attF" data-v="${k}" aria-pressed="${!q&&af===k}">${l} <span class="muted">${n}</span></button>`).join('')}</div></div>
+      <div class="chips att">${shown.map(m=>{const rv=(S.rsvps[d.date]||{})[m.id];return `<button class="chip" data-act="toggle" data-id="${esc(m.id)}" aria-pressed="${d.attendees.includes(m.id)}">${rsMark(d.date,m.id)}${esc(m.name)}<span class="lvl">L${m.level||'?'}</span></button>`}).join('')}</div>
       ${shown.length?'':`<p class="small muted" style="margin:0">${q?'No player matches that name.':af==='coming'?'Nobody ticked yet. Pick All to choose players.':'Nobody here yet.'}</p>`}
       <details${S.paste?' open':''}><summary class="small">Paste names from a Telegram poll</summary>
         <div style="display:grid;gap:8px"><textarea id="paste" data-input="paste" placeholder="One name per line, as they appear in the poll voters list">${esc(S.paste)}</textarea>
@@ -259,9 +256,9 @@ function calHTML(){
   const sel=S.calSel,x=sel&&S.sessions[sel];
   let panel;
   if(!sel)panel='';
-  else if(x){const rv=S.rsvps[sel]||{};const yes=Object.values(rv).filter(v=>v===true).length,no=Object.values(rv).filter(v=>v===false).length;
+  else if(x){const rv=S.rsvps[sel]||{};const yes=Object.values(rv).filter(v=>v===true).length,no=Object.values(rv).filter(v=>v===false).length,late=Object.values(S.rinfo[sel]||{}).filter(v=>v.status==='late'||v.status==='early').length;
     panel=`<section class="card"><div class="card-h"><h2>${esc(pretty(sel))}</h2>${x.published?'<span class="pill good">Members can see it</span>':'<span class="pill warn">Only excos</span>'}</div>
-      <div class="cal-sum"><span>${esc(venueLabel(x.venue))}</span><span>${fmt(toMin(x.start))}–${fmt(toMin(x.end))}</span><span>${(x.attendees||[]).length} ticked as coming</span>${x.published?`<span>${yes} said yes · ${no} can't</span>`:''}</div>
+      <div class="cal-sum"><span>${esc(venueLabel(x.venue))}</span><span>${fmt(toMin(x.start))}–${fmt(toMin(x.end))}</span><span>${(x.attendees||[]).length} ticked as coming</span>${x.published?`<span>${yes} coming${late?` (${late} late or leaving early)`:''} · ${no} can't</span>`:''}</div>
       <div class="row"><button class="primary" data-act="openPlan" data-date="${sel}">View plan</button></div></section>`}
   else panel=`<section class="card"><h2>${esc(pretty(sel))}</h2><p class="muted" style="margin:0">No plan for this day yet.${(dow(sel)===3||dow(sel)===5)?'':' It isn\'t a usual training day.'}</p><div class="row"><button class="primary" data-act="openPlan" data-date="${sel}">Make a plan</button></div></section>`;
   const today2=iso(new Date());
@@ -269,7 +266,7 @@ function calHTML(){
   const upcoming=`<section class="card"><h2>Coming up</h2>${up.length?`<div class="saved">${up.map(v=>`<button data-act="calPick" data-date="${v.date}" aria-current="${v.date===sel}"><span>${esc(pretty(v.date))} · ${esc(venueLabel(v.venue))}</span><span class="muted small">${v.published?'posted':'draft'}</span></button>`).join('')}</div>`:'<p class="muted small" style="margin:0">No upcoming plans. Pick a day on the calendar to make one.</p>'}</section>`;
   const unsaved=S.draft&&S.dirty?`<div class="banner">You have unsaved changes on ${esc(pretty(S.draft.date))}. <button class="ghost" data-act="openPlan" data-date="${S.draft.date}">Go back to it</button></div>`:'';
   const waiting=S.reqs.length?`<div class="banner">${S.reqs.length} ${S.reqs.length===1?'person is':'people are'} waiting to be linked to their name. <a href="#members">Review in Members</a></div>`:'';
-  return `${waiting}${unsaved}<div class="cols"><div class="stack">${grid}</div><div class="stack">${panel}${upcoming}</div></div>`;
+  return `${waiting}${unsaved}<div class="cols"><div class="stack">${grid}</div><div class="stack">${lastMinuteHTML()}${panel}${upcoming}</div></div>`;
 }
 function requestsHTML(){
   if(!S.reqs.length)return '';
@@ -283,27 +280,48 @@ function requestsHTML(){
         <div class="row"><button class="primary" data-act="reqOk" data-id="${esc(r.id)}">Approve</button><button class="ghost danger" data-act="reqNo" data-id="${esc(r.id)}">${S.confirm==='rq'+r.id?'Tap again':'Not them'}</button></div></div>`}).join('')}</div></section>`;
 }
 function adminName(a){if(a.name)return a.name;const mid=Object.keys(S.links).find(k=>S.links[k]===a.id);const m=mid&&S.members.find(m=>m.id===mid);return m?m.name:''}
+function isOwner(){return !!(S.user&&owner&&S.user.uid===owner)}
 function excosHTML(){
   const me=S.user&&S.user.uid,myEmail=S.user&&S.user.email;
   const ids=new Set(S.admins.map(a=>a.id));
   const linked=Object.entries(S.links).filter(([,tg])=>!ids.has(tg)).map(([mid,tg])=>({tg,m:S.members.find(m=>m.id===mid)})).filter(x=>x.m).sort((a,b)=>a.m.name.localeCompare(b.m.name));
-  return `<section class="card"><h2>Excos</h2><p class="small muted" style="margin:0">Excos can open this planner. Everyone's code is on their profile in the member view.</p>
+  const own=isOwner();
+  return `<section class="card"><h2>Excos</h2><p class="small muted" style="margin:0">Excos can open this planner. ${own?"Everyone's code is on their profile in the member view.":'Only the club owner can add or remove excos.'}</p>
     <div class="list">${S.admins.map(a=>{const self=a.id===me||a.id===myEmail;const n=adminName(a);return `<div class="li"><div><div class="nm">${esc(n||'No name')}${self?' <span class="muted small">(you)</span>':''}</div><div class="small muted" style="font-family:var(--mono)">${esc(a.id)}</div></div>
-      ${self?'':`<button class="ghost danger" data-act="exDel" data-id="${esc(a.id)}">${S.confirm==='ex'+a.id?'Tap again':'Remove'}</button>`}</div>`}).join('')}</div>
-    <div class="g2"><label class="f">Their code<input id="ex-code" data-input="exCode" value="${esc(S.exCode)}" placeholder="tg:123456789" autocomplete="off" spellcheck="false"></label>
+      ${self||!own?'':`<button class="ghost danger" data-act="exDel" data-id="${esc(a.id)}">${S.confirm==='ex'+a.id?'Tap again':'Remove'}</button>`}</div>`}).join('')}</div>
+    ${own?`<div class="g2"><label class="f">Their code<input id="ex-code" data-input="exCode" value="${esc(S.exCode)}" placeholder="tg:123456789" autocomplete="off" spellcheck="false"></label>
       <label class="f">Name (optional)<input id="ex-name" data-input="exName" value="${esc(S.exName)}" placeholder="e.g. Captain" autocomplete="off"></label></div>
     <div class="row"><button class="primary" data-act="exAdd"${S.readOnly?' disabled':''}>Add exco</button>
-      ${linked.length?`<select id="ex-pick" data-ex-pick="1" aria-label="Add a member who has logged in"><option value="">Or pick a member who has logged in…</option>${linked.map(x=>`<option value="${esc(x.tg)}">${esc(x.m.name)}</option>`).join('')}</select>`:''}</div>
+      ${linked.length?`<select id="ex-pick" data-ex-pick="1" aria-label="Add a member who has logged in"><option value="">Or pick a member who has logged in…</option>${linked.map(x=>`<option value="${esc(x.tg)}">${esc(x.m.name)}</option>`).join('')}</select>`:''}</div>`:''}
   </section>`;
 }
 
 function gCount(r){const f=r.filter(m=>m.gender==='F').length,m=r.filter(m=>m.gender==='M').length;return (f||m)?` · ${f}F ${m}M`:''}
+// A member's reply: status is yes, late, early or no (older replies only have going).
+function reply(date,id){const v=(S.rinfo[date]||{})[id];if(!v)return null;return {...v,status:v.status||(v.going?'yes':'no')}}
+const STATUS={yes:'Coming',late:'Coming late',early:'Leaving early',no:"Can't make it"};
+function replyNote(r){return [r.time&&(r.status==='late'?'arrives ':r.status==='early'?'leaves ':'')+fmt(toMin(r.time)),r.reason].filter(Boolean).join(' · ')}
+function rsMark(date,id){const r=reply(date,id);if(!r)return '';const note=esc(STATUS[r.status]+(replyNote(r)?': '+replyNote(r):''));
+  return r.status==='yes'?`<span class="rs yes" title="${note}">✓</span>`:r.status==='late'?`<span class="rs late" title="${note}">L</span>`:r.status==='early'?`<span class="rs late" title="${note}">E</span>`:`<span class="rs no" title="${note}">✕</span>`}
 function rsvpSummary(d,list){
   const rv=S.rsvps[d.date]||{};const yes=list.filter(m=>rv[m.id]===true),no=list.filter(m=>rv[m.id]===false);
   if(!d.published&&!yes.length&&!no.length)return `<p class="small muted" style="margin:0">Tick "Members can see this training" and save to open the poll in the member view.</p>`;
   const missing=yes.filter(m=>!d.attendees.includes(m.id)).length;
-  return `<div class="row small"><span class="pill good">${yes.length} yes</span><span class="pill bad">${no.length} no</span><span class="muted">${list.length-yes.length-no.length} no reply</span>${missing?`<button data-act="rsvpYes">Tick the ${missing} who said yes</button>`:''}</div>`;
+  const notes=list.map(m=>({m,r:reply(d.date,m.id)})).filter(x=>x.r&&(x.r.status!=='yes'&&(x.r.reason||x.r.time||x.r.status!=='no')));
+  const late=notes.filter(x=>x.r.status==='late').length,early=notes.filter(x=>x.r.status==='early').length;
+  return `<div class="row small"><span class="pill good">${yes.length} coming</span>${late?`<span class="pill warn">${late} late</span>`:''}${early?`<span class="pill warn">${early} leaving early</span>`:''}<span class="pill bad">${no.length} can't</span><span class="muted">${list.length-yes.length-no.length} no reply</span>${missing?`<button data-act="rsvpYes">Tick the ${missing} who are coming</button>`:''}</div>
+    ${notes.length?`<details><summary class="small">Late, leaving early and reasons (${notes.length})</summary><div class="list notes">${notes.sort((a,b)=>a.m.name.localeCompare(b.m.name)).map(({m,r})=>`<div class="li"><div><div class="nm">${esc(m.name)} <span class="pill ${r.status==='no'?'bad':'warn'}" style="padding:0 6px;font-size:11px">${esc(STATUS[r.status])}</span>${r.prev&&r.prev!==r.status?` <span class="small muted">was ${esc(STATUS[r.prev].toLowerCase())}</span>`:''}</div>${replyNote(r)?`<div class="small muted">${esc(replyNote(r))}</div>`:''}</div></div>`).join('')}</div></details>`:''}`;
 }
+// Replies changed in the 24 hours before a training starts, for trainings in the next 2 days.
+function lastMinute(){
+  const now=Date.now(),out=[];
+  for(const x of Object.values(S.sessions)){if(!x.published)continue;const st=new Date(x.date+'T'+(x.start||'15:30')+':00').getTime();if(st<now-3*3600e3||st>now+48*3600e3)continue;
+    for(const [id,v] of Object.entries(S.rinfo[x.date]||{})){const at=Date.parse(v.at);if(!(at>=st-24*3600e3))continue;const r=reply(x.date,id);if(r.status==='yes'&&!r.prev)continue;
+      const m=S.members.find(m=>m.id===id);if(m)out.push({x,m,r,at})}}
+  return out.sort((a,b)=>b.at-a.at);
+}
+function lastMinuteHTML(){const l=lastMinute();if(!l.length)return '';
+  return `<section class="card lastmin"><div class="card-h"><h2>Last-minute changes</h2><span class="small muted">in the 24 hours before training</span></div><div class="list">${l.slice(0,12).map(({x,m,r,at})=>`<div class="li"><div><div class="nm">${esc(m.name)} <span class="pill ${r.status==='no'?'bad':r.status==='yes'?'good':'warn'}" style="padding:0 6px;font-size:11px">${esc(STATUS[r.status])}</span>${r.prev&&r.prev!==r.status?` <span class="small muted">was ${esc(STATUS[r.prev].toLowerCase())}</span>`:''}</div><div class="small muted">${esc(pretty(x.date))} · ${new Date(at).toLocaleString('en-SG',{weekday:'short',hour:'numeric',minute:'2-digit'})}${replyNote(r)?' · '+esc(replyNote(r)):''}</div></div></div>`).join('')}</div></section>`}
 function dots(n){return `<span class="dots" aria-label="Level ${n} of 5">${[1,2,3,4,5].map(i=>`<i class="${i<=n?'on':''}"></i>`).join('')}</span>`}
 
 function membersHTML(){
@@ -326,20 +344,18 @@ function membersHTML(){
       <div class="seg" role="group" aria-label="Gender">${GENDER.map(([k,l])=>`<button data-act="mgender" data-g="${k}" aria-pressed="${f.gender===k}">${l}</button>`).join('')}</div></div>
     <div style="display:grid;gap:6px"><span class="eyebrow">Positions</span>
       <div class="chips">${POS.map(([k,l])=>`<button class="chip" data-act="mpos" data-p="${k}" aria-pressed="${f.pos.includes(k)}">${l}</button>`).join('')}</div></div>
-    ${telegramEnabled?'':`<label class="f">Member PIN<div class="row" style="flex-wrap:nowrap"><input id="mf-pin" data-input="mf.pin" value="${esc(f.pin)}" inputmode="numeric" maxlength="4" placeholder="4 digits" style="max-width:120px"><button data-act="mpin">New PIN</button></div><span class="small muted" style="font-weight:400">They use this with their name to reply to trainings.</span></label>`}
     <div class="row"><button class="primary" data-act="msave"${S.readOnly?' disabled':''}>${f.id?'Save changes':'Add member'}</button>${f.id?'<button data-act="mcancel">Cancel</button>':''}</div>
   </section>`;
-  const list=`<section class="card"><h2>Roster</h2>${ms.length?`<div class="list">${ms.map(m=>`<div class="li"><div><div class="nm">${esc(m.name)}${m.tg?` <span class="muted small" style="font-weight:400">@${esc(m.tg)}</span>`:''}</div><div class="small muted">${S.links[m.id]?'<span class="pill good" style="padding:0 6px;font-size:11px">Telegram</span> ':''}${telegramEnabled?(S.links[m.id]?'':'<span class="pill" style="padding:0 6px;font-size:11px;color:var(--muted)">not linked</span> '):S.pins[m.id]?'':'<span class="pill warn" style="padding:0 6px;font-size:11px">no PIN</span> '}${dots(m.level||0)} ${esc(LEVELS[m.level]||'')}${m.gender?' · '+esc((GENDER.find(x=>x[0]===m.gender)||[,''])[1]):''}${(m.pos||[]).length?' · '+esc(m.pos.map(p=>(POS.find(x=>x[0]===p)||[,p])[1]).join(', ')):''}</div></div>
+  const list=`<section class="card"><h2>Roster</h2>${ms.length?`<div class="list">${ms.map(m=>`<div class="li"><div><div class="nm">${esc(m.name)}${m.tg?` <span class="muted small" style="font-weight:400">@${esc(m.tg)}</span>`:''}</div><div class="small muted">${S.links[m.id]?'<span class="pill good" style="padding:0 6px;font-size:11px">Telegram</span> ':''}${S.links[m.id]?'':'<span class="pill" style="padding:0 6px;font-size:11px;color:var(--muted)">not linked</span> '}${dots(m.level||0)} ${esc(LEVELS[m.level]||'')}${m.gender?' · '+esc((GENDER.find(x=>x[0]===m.gender)||[,''])[1]):''}${(m.pos||[]).length?' · '+esc(m.pos.map(p=>(POS.find(x=>x[0]===p)||[,p])[1]).join(', ')):''}</div></div>
       <div class="row"><button class="ghost" data-act="medit" data-id="${esc(m.id)}">Edit</button><button class="ghost danger" data-act="mdel" data-id="${esc(m.id)}">${S.confirm==='m'+m.id?'Tap again':'Delete'}</button></div></div>`).join('')}</div>`
     :'<div class="empty">Your roster is empty. Add each player with a level from 1 (new) to 5 (standout) so teams can be balanced.</div>'}</section>`;
-  const nopin=ms.filter(m=>!S.pins[m.id]).length;
   const nouser=ms.filter(m=>!m.tg).length;
   const tgCard=`<section class="card"><div class="card-h"><h2>Telegram usernames</h2><span class="small muted">${ms.length-nouser} of ${ms.length} added</span></div>
     <p class="small muted" style="margin:0">Members whose @username is here are linked automatically when they log in. Anyone else picks their name and you approve them under New logins.</p>
     <details${S.tgPaste?' open':''}><summary class="small">Paste a list</summary><div style="display:grid;gap:8px">
       <textarea id="tg-paste" data-input="tgPaste" placeholder="One per line, e.g.&#10;Jane Tan @janetan&#10;Alex Lim - @alexl">${esc(S.tgPaste||'')}</textarea>
       <div class="row"><button data-act="tgPasteSave">Save usernames</button><span class="small muted">${esc(S.tgMsg||'')}</span></div></div></details></section>`;
-  const pins=ms.length?(telegramEnabled?tgCard:`<section class="card"><div class="card-h"><h2>Member PINs</h2><div class="row">${nopin?`<button data-act="pinsAll">Give PINs to ${nopin} without one</button>`:''}<button data-act="pinsCopy">Copy PIN list</button></div></div><p class="small muted" style="margin:0">Members sign in on the member page with their name and PIN. Send each person their own PIN.</p></section>`)
+  const pins=ms.length?tgCard
     :`<section class="card"><h2>Import roster</h2><p class="small muted" style="margin:0">Load the backup file with your members and drills to get started.</p><input type="file" id="import-file" accept="application/json,.json"></section>`;
   return `${requestsHTML()}<div class="cols"><div class="stack">${form}${pins}${excosHTML()}</div><div class="stack">${summary}${list}</div></div>`;
 }
@@ -559,8 +575,8 @@ const A={
     const old=S.links[mid];
     if(await write(async()=>{if(old&&old!==id)await S.db.doc('claims/'+old).delete();await S.db.doc('claims/'+id).set({memberId:mid,approvedBy:S.user.uid,at:new Date().toISOString()});await S.db.doc('linkRequests/'+id).delete()},`${m.name} is linked`))render()},
   async reqNo({id}){if(!armConfirm('rq'+id))return;await write(()=>S.db.doc('linkRequests/'+id).delete(),'Request removed');render()},
-  async exAdd(){const code=S.exCode.trim();
-    if(!/^tg:\d{3,}$/.test(code)&&!/^[^@\s/]+@[^@\s/]+\.[^@\s/]+$/.test(code))return toast('Paste their code, which looks like tg:123456789.');
+  async exAdd(){const code=S.exCode.trim();if(!isOwner())return toast('Only the club owner can add excos.');
+    if(!/^tg:\d{3,}$/.test(code))return toast('Paste their code, which looks like tg:123456789.');
     if(S.admins.some(a=>a.id===code))return toast("They're already an exco.");
     if(await write(()=>S.db.doc('admins/'+code).set({name:S.exName.trim(),addedBy:S.user.uid,at:new Date().toISOString()}),'Exco added')){S.exCode='';S.exName='';render()}},
   async exDel({id}){if(!armConfirm('ex'+id))return;await write(()=>S.db.doc('admins/'+id).delete(),'Exco removed');render()},
@@ -572,23 +588,18 @@ const A={
   mlevel({n}){S.mf.level=+n},
   mgender({g}){S.mf.gender=S.mf.gender===g?'':g},
   mpos({p}){const a=S.mf.pos;const i=a.indexOf(p);i>=0?a.splice(i,1):a.push(p)},
-  medit({id}){const m=S.members.find(m=>m.id===id);if(m){S.mf={id:m.id,name:m.name,level:m.level||3,pos:[...(m.pos||[])],gender:m.gender||'',pin:(S.pins[m.id]||''),tg:m.tg?'@'+m.tg:''};scrollTo({top:0})}},
+  medit({id}){const m=S.members.find(m=>m.id===id);if(m){S.mf={id:m.id,name:m.name,level:m.level||3,pos:[...(m.pos||[])],gender:m.gender||'',tg:m.tg?'@'+m.tg:''};scrollTo({top:0})}},
   mcancel(){S.mf=newMemberForm()},
   async msave(){const f=S.mf;const name=f.name.trim();if(!name)return toast('Enter a name first.');
     if(S.members.some(m=>m.id!==f.id&&norm(m.name)===norm(name)))return toast(`${name} is already on the roster.`);
     const ref=f.id?S.db.doc('members/'+f.id):S.db.collection('members').doc();
     const old=f.id?S.members.find(m=>m.id===f.id):null;
-    const pin=String(f.pin||'').trim();if(pin&&!/^\d{4}$/.test(pin))return toast('The PIN needs to be 4 digits.');
     const tg=tgNorm(f.tg);if(tg&&!tgOk(tg))return toast("That doesn't look like a Telegram username.");
     const clash=tg&&S.members.find(m=>m.id!==f.id&&m.tg===tg);if(clash)return toast(`@${tg} is already on ${clash.name}.`);
-    if(await write(async()=>{await ref.set({name,level:f.level,pos:f.pos,gender:f.gender,active:old?.active??true,...(tg?{tg}:{})});await S.db.doc('roster/'+ref.id).set({name});await setTgIndex(ref.id,old?.tg,tg);if(pin&&pin!==S.pins[ref.id])await S.db.doc('memberPins/'+ref.id).set({pin})},f.id?'Member updated':`${name} added`)){S.mf=newMemberForm();render()}},
-  mpin(){S.mf.pin=newPin()},
-  async pinsAll(){const miss=S.members.filter(m=>!S.pins[m.id]);for(const m of miss){if(!await write(()=>S.db.doc('memberPins/'+m.id).set({pin:newPin()})))return}toast(`Gave ${miss.length} members a PIN`)},
-  pinsCopy(){const t=[...S.members].sort((a,b)=>a.name.localeCompare(b.name)).map(m=>`${m.name}: ${S.pins[m.id]||'no PIN yet'}`).join('\n');copyText(t,'PIN list copied. Send each member their own PIN privately.')},
+    if(await write(async()=>{await ref.set({name,level:f.level,pos:f.pos,gender:f.gender,active:old?.active??true,...(tg?{tg}:{})});await S.db.doc('roster/'+ref.id).set({name});await setTgIndex(ref.id,old?.tg,tg)},f.id?'Member updated':`${name} added`)){S.mf=newMemberForm();render()}},
   rsvpYes(){const d=S.draft,rv=S.rsvps[d.date]||{};S.members.forEach(m=>{if(rv[m.id]===true&&!d.attendees.includes(m.id)){d.attendees.push(m.id);d.teams[m.id]=smallestTeam(d)}});markDirty()},
-  async signin(){try{await signInGoogle();S.user=auth.currentUser;start()}catch(e){toast("Sign-in didn't finish. Try again.")}},
   async signout(){await logOut();location.reload()},
-  async mdel({id}){if(!armConfirm('m'+id))return;await write(async()=>{await S.db.doc('members/'+id).delete();await S.db.doc('roster/'+id).delete();await S.db.doc('memberPins/'+id).delete();const m=S.members.find(m=>m.id===id);if(m&&m.tg)await S.db.doc('tgIndex/'+m.tg).delete()},'Member removed');if(S.mf.id===id)S.mf=newMemberForm();render()},
+  async mdel({id}){if(!armConfirm('m'+id))return;await write(async()=>{await S.db.doc('members/'+id).delete();await S.db.doc('roster/'+id).delete();const m=S.members.find(m=>m.id===id);if(m&&m.tg)await S.db.doc('tgIndex/'+m.tg).delete()},'Member removed');if(S.mf.id===id)S.mf=newMemberForm();render()},
   dvenue({v}){const a=S.df.venues;const i=a.indexOf(v);i>=0?a.splice(i,1):a.push(v)},
   dedit({id}){const x=S.drills.find(x=>x.id===id);if(x){S.df={id:x.id,name:x.name,minutes:x.minutes,category:x.category,venues:[...(x.venues||[])],station:!!x.station,auto:!!x.auto,notes:x.notes||'',order:x.order};scrollTo({top:0})}},
   dcancel(){S.df=newDrillForm()},
@@ -672,12 +683,11 @@ function start(){
   db.collection('members').onSnapshot(s=>{S.members=s.docs.map(x=>({id:x.id,...x.data()}));S.ready.m=1;afterData();syncRoster()},fail);
   db.collection('drills').onSnapshot(s=>{S.drills=s.docs.map(x=>({id:x.id,...x.data()}));S.ready.d=1;afterData()},fail);
   db.collection('sessions').onSnapshot(s=>{S.sessions=Object.fromEntries(s.docs.map(x=>[x.id,x.data()]));S.ready.s=1;afterData()},fail);
-  db.collection('memberPins').onSnapshot(s=>{S.pins=Object.fromEntries(s.docs.map(x=>[x.id,x.data().pin]));if(S.status==='ok')render()},fail);
   db.collection('roster').onSnapshot(s=>{S.roster=Object.fromEntries(s.docs.map(x=>[x.id,x.data().name]));S.ready.r=1;syncRoster()},fail);
   db.collection('claims').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();if(x.id.startsWith('tg:'))o[v.memberId]=x.id});S.links=o;if(S.status==='ok')render()},()=>{});
   db.collection('linkRequests').onSnapshot(s=>{S.reqs=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>String(a.at).localeCompare(String(b.at)));if(S.status==='ok')render()},()=>{});
   db.collection('admins').onSnapshot(s=>{S.admins=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>(adminName(a)||a.id).localeCompare(adminName(b)||b.id));if(S.status==='ok')render()},()=>{});
-  db.collection('rsvps').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]=v.going});S.rsvps=o;if(S.status==='ok')render()},fail);
+  db.collection('rsvps').onSnapshot(s=>{const o={},inf={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]=v.going;(inf[v.date]=inf[v.date]||{})[v.memberId]=v});S.rsvps=o;S.rinfo=inf;if(S.status==='ok')render()},fail);
 }
 (async()=>{
   route();

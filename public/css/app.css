@@ -176,7 +176,9 @@ details[open] summary{margin-bottom:8px}
 .teams{grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr))}
 @media (prefers-reduced-motion:no-preference){.chip,button{transition:background .12s,border-color .12s,color .12s}}
 .rs{font-weight:700;font-size:12px}
-.rs.yes{color:var(--good)} .rs.no{color:var(--bad)}
+.rs.yes{color:var(--good)} .rs.no{color:var(--bad)} .rs.late{color:var(--warn)}
+.lastmin{border-left:4px solid var(--warn)}
+.list.notes .li{padding:6px 0}
 .chip[aria-pressed="true"] .rs{color:inherit}
 .top .wrap>.ghost{color:inherit;border-color:transparent}
 .att-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}

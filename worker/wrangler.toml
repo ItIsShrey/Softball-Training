@@ -5,6 +5,14 @@ compatibility_date = "2024-09-23"
 [vars]
 # The site allowed to call this Worker.
 ALLOWED_ORIGIN = "https://softball-training-a2e32.web.app"
+# Only members of this Telegram group can log in. The bot must be added to the group.
+# Group IDs look like -1001234567890. Leave empty to let anyone with Telegram log in.
+GROUP_CHAT_ID = ""
+# Telegram IDs that can always log in, comma separated (the owner, so a wrong group ID can't lock you out).
+ALWAYS_ALLOW = "834667219"
+# The excos' Telegram chat for last-minute reply changes (the bot must be in it). Leave empty for no alerts.
+EXCO_CHAT_ID = ""
+FIREBASE_PROJECT_ID = "softball-training-a2e32"
 
 # Secrets (set with `npx wrangler secret put NAME`, never commit them):
 #   BOT_TOKEN              token from @BotFather
