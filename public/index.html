@@ -68,14 +68,15 @@ function toast(msg){const el=$('#toast');el.textContent=msg;el.hidden=false;clea
 
 function render(){
   const app=$('#app');
-  const a=document.activeElement,fid=a&&a.id;
+  const a=document.activeElement,fid=a&&a.id;let sel=null;
+  try{if(a&&'selectionStart' in a)sel=[a.selectionStart,a.selectionEnd]}catch(e){}
   if(M.status==='noconfig')app.innerHTML=`<section class="card"><h2>Not set up yet</h2><p class="muted">The club hasn't connected this page to its database yet.</p></section>`;
   else if(M.status==='loading')return;
   else if(M.status==='error')app.innerHTML=`<section class="card"><h2>Can't load trainings</h2><p class="muted">Check your connection and reload the page.</p></section>`;
   else if(M.status==='tglogin'){app.innerHTML=tgLoginHTML();mountTelegramButton(document.getElementById('tg-login'),onTelegram)}
   else if(M.status==='login')app.innerHTML=loginHTML();
   else app.innerHTML=homeHTML();
-  if(fid){const el=document.getElementById(fid);if(el&&el!==document.activeElement)el.focus({preventScroll:true})}
+  if(fid){const el=document.getElementById(fid);if(el&&el!==document.activeElement){el.focus({preventScroll:true});try{if(sel&&sel[0]!=null)el.setSelectionRange(sel[0],sel[1])}catch(e){}}}
 }
 
 function tgLoginHTML(){
