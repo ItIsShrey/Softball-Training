@@ -11,7 +11,7 @@ GROUP_CHAT_ID = ""
 # Telegram IDs that can always log in, comma separated (the owner, so a wrong group ID can't lock you out).
 ALWAYS_ALLOW = "834667219"
 # The excos' Telegram chat for last-minute reply changes (the bot must be in it). Leave empty for no alerts.
-EXCO_CHAT_ID = ""
+EXCO_CHAT_ID = "-5056804168"
 FIREBASE_PROJECT_ID = "softball-training-a2e32"
 
 # Secrets (set with `npx wrangler secret put NAME`, never commit them):
