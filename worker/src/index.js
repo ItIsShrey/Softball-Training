@@ -94,13 +94,6 @@ async function notifyExcos(request, env, cors) {
 
 // An exco asks the bot to post a published training to the club group, with a button to reply in the app.
 const VENUES = { MPSH: 'MPSH (hall)', Kallang: 'Kallang field', Jurong: 'Jurong field' };
-const HYPE = [
-  'Bring the energy, bring your glove! 💪',
-  'Time to put in the reps! 🔥',
-  'Let\'s get better together! 🙌',
-  'Come swing, catch and have fun! ⚡',
-  'Every rep counts. See you there! 💥',
-];
 const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const clock = t => { const [h, m] = String(t || '').split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m || 0).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; };
 async function announceTraining(request, env, cors) {
@@ -120,7 +113,6 @@ async function announceTraining(request, env, cors) {
 
   const day = new Date(`${date}T12:00:00+08:00`).toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Singapore' });
   const venue = VENUES[val(session, 'venue')] || val(session, 'venue') || '';
-  const hype = HYPE[Math.floor(Math.random() * HYPE.length)];
   const text = [
     '🥎 <b>TRAINING TIME!</b> 🥎',
     '',
@@ -128,7 +120,6 @@ async function announceTraining(request, env, cors) {
     `⏰ ${clock(val(session, 'start') || '15:30')} – ${clock(val(session, 'end') || '18:00')}`,
     venue ? `📍 ${esc(venue)}` : '',
     '',
-    hype,
     '👇 Let us know if you\'re coming!',
   ].filter((l, i, a) => l || a[i - 1]).join('\n');
   const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
