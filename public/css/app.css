@@ -219,3 +219,4 @@ details[open] summary{margin-bottom:8px}
 .li.req{align-items:center}
 .li.req select{max-width:220px}
 @media (max-width:480px){.brand{font-size:14px}h2{font-size:16px}}
+.post-row{align-items:center}

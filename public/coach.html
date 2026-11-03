@@ -24,7 +24,7 @@
 <div class="toast" id="toast" hidden></div>
 
 <script type="module">
-import { db, auth, configured, currentUser, logOut, telegramEnabled, owner } from './js/store.js';
+import { db, auth, configured, currentUser, logOut, telegramEnabled, owner, announceTraining } from './js/store.js';
 const VENUES=[{id:'MPSH',label:'MPSH (hall)',kind:'MPSH',from:'15:30',to:'18:00'},{id:'Kallang',label:'Kallang field',kind:'Field',from:'15:30',to:'18:00'},{id:'Jurong',label:'Jurong field',kind:'Field',from:'15:30',to:'18:00'}];
 const venueOf=id=>VENUES.find(v=>v.id===id)||VENUES[0];
 /* problems with the venue's booked slot, as sentences */
@@ -170,6 +170,7 @@ function planHTML(){
     </div>
     <div style="display:grid;gap:6px"><label class="check"><input type="checkbox" id="f-pub" data-fb="published"${d.published?' checked':''}><span>Members can see this training and reply Yes or No</span></label>
       <label class="check"><input type="checkbox" id="f-tv" data-fb="teamsVisible"${d.teamsVisible?' checked':''}${d.published?'':' disabled'}><span>Show teams and game lineups to members</span></label></div>
+    ${postHTML(d)}
     <div class="row"><span class="eyebrow">Teams</span><div class="seg" role="group" aria-label="Number of teams">${[2,3].map(n=>`<button data-act="teams" data-n="${n}" aria-pressed="${d.numTeams===n}">${n}</button>`).join('')}</div>
     <span class="muted small">${kind==='MPSH'?'MPSH usually runs 2 batting stations and 1 fielding.':'Field days run drills one after another.'}</span></div>
   </section>`;
@@ -280,6 +281,13 @@ function requestsHTML(){
         <div class="row"><button class="primary" data-act="reqOk" data-id="${esc(r.id)}">Approve</button><button class="ghost danger" data-act="reqNo" data-id="${esc(r.id)}">${S.confirm==='rq'+r.id?'Tap again':'Not them'}</button></div></div>`}).join('')}</div></section>`;
 }
 function adminName(a){if(a.name)return a.name;const mid=Object.keys(S.links).find(k=>S.links[k]===a.id);const m=mid&&S.members.find(m=>m.id===mid);return m?m.name:''}
+// Posting a training to the club's Telegram group. The Worker checks you're an exco and that it's published.
+function postHTML(d){
+  if(!telegramEnabled)return '';
+  const live=S.sessions[d.date];const ready=live&&live.published&&!S.dirty;const at=live&&live.announcedAt;
+  return `<div class="row post-row"><button data-act="announce"${ready&&!S.posting?'':' disabled'}>${S.posting?'Posting…':S.confirm==='announce'?'Tap again to post it again':at?'Post to the group again':'Post to the Telegram group'}</button>
+    <span class="small muted">${!live||!live.published?'Tick "Members can see this training" and save first.':S.dirty?'Save your changes first.':at?`Posted ${esc(new Date(at).toLocaleString('en-SG',{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}))}.`:'The bot posts the date, time and venue with a button to reply.'}</span></div>`;
+}
 function isOwner(){return !!(S.user&&owner&&S.user.uid===owner)}
 function excosHTML(){
   const me=S.user&&S.user.uid,myEmail=S.user&&S.user.email;
@@ -579,6 +587,12 @@ const A={
     if(!/^tg:\d{3,}$/.test(code))return toast('Paste their code, which looks like tg:123456789.');
     if(S.admins.some(a=>a.id===code))return toast("They're already an exco.");
     if(await write(()=>S.db.doc('admins/'+code).set({name:S.exName.trim(),addedBy:S.user.uid,at:new Date().toISOString()}),'Exco added')){S.exCode='';S.exName='';render()}},
+  async announce(){const d=S.draft;const live=S.sessions[d.date];if(!live||!live.published||S.dirty)return;
+    if(live.announcedAt&&!armConfirm('announce'))return;
+    S.posting=true;render();
+    try{const r=await announceTraining(d.date);S.draft.announcedAt=r.announcedAt;toast('Posted to the group')}
+    catch(e){toast(e&&e.message==='no_chat'?"The bot doesn't have a group to post to yet.":"Couldn't post it. Try again.")}
+    S.posting=false;render()},
   async exDel({id}){if(!armConfirm('ex'+id))return;await write(()=>S.db.doc('admins/'+id).delete(),'Exco removed');render()},
   async save(){const d=clone(S.draft);d.updatedAt=new Date().toISOString();if(await write(()=>S.db.doc('sessions/'+d.date).set(d),'Plan saved')){S.dirty=false;S.blocksEdited=true;render()}},
   async delsess(){if(!armConfirm('delsess'))return;const date=S.draft.date;if(await write(()=>S.db.doc('sessions/'+date).delete(),'Plan deleted')){S.dirty=true;render()}},
