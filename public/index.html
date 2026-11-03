@@ -173,7 +173,7 @@ function homeHTML(){
   const today=iso(new Date());
   const up=M.sessions.filter(x=>x.date>=today).sort((a,b)=>a.date.localeCompare(b.date));
   const bar=`<div class="me-bar"><span>Hi${M.me?` <b>${esc(firstName(M.roster[M.me]||''))}</b>`:''}</span><div class="row">${M.admin?'<a class="btnlink" href="coach.html">Coach view</a>':''}<button class="ghost" data-act="profile" aria-expanded="${M.showProfile}">Profile</button></div></div>${M.showProfile?profileHTML():''}`;
-  if(!M.me)return bar+`<section class="card"><h2>Link your name</h2><p class="muted" style="margin:0">To reply to trainings, find your name and enter the PIN from your exco. You only do this once.</p><div class="row"><button class="primary" data-act="tolink">Find my name</button></div></section>`;
+  if(!M.me)return bar+`<section class="card"><h2>Link your name</h2><p class="muted" style="margin:0">To reply to trainings, ${telegramEnabled?'find your name and an exco will confirm it':'find your name and enter the PIN from your exco'}. You only do this once.</p><div class="row"><button class="primary" data-act="tolink">Find my name</button></div></section>`;
   return `${bar}
     ${up.length?up.map(trainingHTML).join(''):`<section class="card"><h2>No trainings posted</h2><p class="muted" style="margin:0">When the excos post the next training, it'll show here and you can reply.</p></section>`}`;
 }

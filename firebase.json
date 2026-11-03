@@ -1,8 +1,40 @@
 {
   "hosting": {
     "public": "public",
-    "ignore": ["firebase.json", "**/.*"],
-    "cleanUrls": true
+    "ignore": [
+      "firebase.json",
+      "**/.*"
+    ],
+    "cleanUrls": true,
+    "headers": [
+      {
+        "source": "**/*.@(html|js|css)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "/",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "source": "/coach",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ]
   },
   "firestore": {
     "rules": "firestore.rules"
