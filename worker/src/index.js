@@ -94,6 +94,7 @@ async function notifyExcos(request, env, cors) {
 
 // An exco asks the bot to post a published training to the club group, with a button to reply in the app.
 const VENUES = { MPSH: 'MPSH (hall)', Kallang: 'Kallang field', Jurong: 'Jurong field' };
+const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const clock = t => { const [h, m] = String(t || '').split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m || 0).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; };
 async function announceTraining(request, env, cors) {
   const chat = env.ANNOUNCE_CHAT_ID || env.GROUP_CHAT_ID;
@@ -112,10 +113,18 @@ async function announceTraining(request, env, cors) {
 
   const day = new Date(`${date}T12:00:00+08:00`).toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Singapore' });
   const venue = VENUES[val(session, 'venue')] || val(session, 'venue') || '';
-  const text = [`New training: ${day}`, `${clock(val(session, 'start') || '15:30')} to ${clock(val(session, 'end') || '18:00')}${venue ? ' at ' + venue : ''}`, '', 'Tap below to say if you\'re coming.'].join('\n');
+  const text = [
+    '🥎 <b>TRAINING TIME!</b> 🥎',
+    '',
+    `📅 <b>${esc(day)}</b>`,
+    `⏰ ${clock(val(session, 'start') || '15:30')} – ${clock(val(session, 'end') || '18:00')}`,
+    venue ? `📍 ${esc(venue)}` : '',
+    '',
+    '👇 Let us know if you\'re coming!',
+  ].filter((l, i, a) => l || a[i - 1]).join('\n');
   const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chat, text, disable_web_page_preview: true, reply_markup: { inline_keyboard: [[{ text: 'Reply in the app', url: env.ALLOWED_ORIGIN }]] } }),
+    body: JSON.stringify({ chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [[{ text: '🙋 I\'m in / can\'t make it', url: env.ALLOWED_ORIGIN }]] } }),
   });
   if (!res.ok) { console.log('announce telegram', res.status, await res.text()); return json({ error: 'telegram_failed' }, 502, cors); }
   const announcedAt = new Date().toISOString();
