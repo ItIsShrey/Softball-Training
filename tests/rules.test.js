@@ -139,3 +139,25 @@ test('changing a yes to a no needs a reason; a first no does not', async () => {
 test('a member who is not linked cannot reply', async () => {
   await assertFails(setDoc(doc(as(NEWBIE), 'rsvps', `${DATE}_m3`), reply({ memberId: 'm3', uid: NEWBIE })));
 });
+
+test('replies close 3 hours after the training starts (Singapore time)', async () => {
+  const PAST = '2020-01-08';
+  const sgNow = new Date(Date.now() + 8 * 3600e3);
+  const hhmm = d => `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  // Today in Singapore, with one training that started 4 hours ago and one that started 2 hours ago.
+  const today = sgNow.toISOString().slice(0, 10);
+  await env.withSecurityRulesDisabled(async ctx => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'sessions', PAST), { published: true, start: '15:30' });
+    await setDoc(doc(db, 'sessions', today), { published: true, start: hhmm(new Date(sgNow - 2 * 3600e3)) });
+  });
+  const db = as(MEMBER);
+  await assertFails(setDoc(doc(db, 'rsvps', `${PAST}_m1`), reply({ date: PAST })));
+  if (sgNow.getUTCHours() >= 2) await assertSucceeds(setDoc(doc(db, 'rsvps', `${today}_m1`), reply({ date: today })));
+  await assertSucceeds(setDoc(doc(as(EXCO), 'rsvps', `${PAST}_m2`), reply({ date: PAST, memberId: 'm2', uid: EXCO })));
+});
+
+test('nobody can read or write the alert markers', async () => {
+  await assertFails(getDoc(doc(as(OWNER), 'notified', 'x')));
+  await assertFails(setDoc(doc(as(OWNER), 'notified', 'x'), { at: 1 }));
+});

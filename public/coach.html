@@ -47,15 +47,18 @@ const venueLabel=id=>(VENUES.find(v=>v.id===id)||{label:id}).label;
 const toMin=t=>{const[h,m]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0)};
 const fmt=m=>{const h=Math.floor(m/60),mm=((m%60)+60)%60;return (((h+11)%12)+1)+':'+String(mm).padStart(2,'0')};
 const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-const dow=s=>new Date(s+'T12:00:00').getDay();
-const pretty=s=>new Date(s+'T12:00:00').toLocaleDateString('en-SG',{weekday:'short',day:'numeric',month:'short'});
+const dow=s=>new Date(s+'T12:00:00Z').getUTCDay();
+const pretty=s=>new Date(s+'T12:00:00Z').toLocaleDateString('en-SG',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'});
+// Trainings are in Singapore, so "today" and start times are Singapore time whatever the device is set to.
+const sgDate=ms=>new Date(ms+8*3600e3).toISOString().slice(0,10);
+const sgToday=()=>sgDate(Date.now());
 const rid=()=>Math.random().toString(36).slice(2,9);
 const clone=o=>JSON.parse(JSON.stringify(o));
 const blockMin=b=>b.kind==='rotation'?(+b.per||0)*b.stations.length:(+b.minutes||0);
 const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 const byOrder=(a,b)=>(a.order??0)-(b.order??0)||String(a.name).localeCompare(b.name);
 
-function nextTraining(){const d=new Date();for(let i=0;i<7;i++){const x=new Date(d);x.setDate(d.getDate()+i);if(x.getDay()===3||x.getDay()===5)return iso(x)}return iso(d)}
+function nextTraining(){for(let i=0;i<7;i++){const d=sgDate(Date.now()+i*864e5);if(dow(d)===3||dow(d)===5)return d}return sgToday()}
 
 const S={db:null,user:null,links:{},roster:{},rsvps:{},rinfo:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
   members:[],drills:[],sessions:{},view:'plan',draft:null,dirty:false,blocksEdited:false,
@@ -168,7 +171,7 @@ function planHTML(){
       <label class="f">Start<input type="time" id="f-start" data-f="start" value="${esc(d.start)}"></label>
       <label class="f">End<input type="time" id="f-end" data-f="end" value="${esc(d.end)}"></label>
     </div>
-    <div style="display:grid;gap:6px"><label class="check"><input type="checkbox" id="f-pub" data-fb="published"${d.published?' checked':''}><span>Members can see this training and reply Yes or No</span></label>
+    <div style="display:grid;gap:6px"><label class="check"><input type="checkbox" id="f-pub" data-fb="published"${d.published?' checked':''}><span>Members can see this training and reply</span></label>
       <label class="check"><input type="checkbox" id="f-tv" data-fb="teamsVisible"${d.teamsVisible?' checked':''}${d.published?'':' disabled'}><span>Show teams and game lineups to members</span></label></div>
     ${postHTML(d)}
     <div class="row"><span class="eyebrow">Teams</span><div class="seg" role="group" aria-label="Number of teams">${[2,3].map(n=>`<button data-act="teams" data-n="${n}" aria-pressed="${d.numTeams===n}">${n}</button>`).join('')}</div>
@@ -246,7 +249,7 @@ const MONTHS=['January','February','March','April','May','June','July','August',
 function calHTML(){
   const [y,mo]=S.calMonth.split('-').map(Number);
   const first=new Date(y,mo-1,1),lead=(first.getDay()+6)%7,days=new Date(y,mo,0).getDate();
-  const today=iso(new Date());
+  const today=sgToday();
   const cells=[];for(let i=0;i<lead;i++)cells.push('<span class="cd blank"></span>');
   for(let n=1;n<=days;n++){const date=`${y}-${String(mo).padStart(2,'0')}-${String(n).padStart(2,'0')}`;const x=S.sessions[date];const wd=dow(date);
     const cls=['cd',x?'has':'',x&&x.published?'pub':'',(wd===3||wd===5)?'tday':'',date===today?'today':'',S.draft&&S.dirty&&S.draft.date===date?'unsaved':''].filter(Boolean).join(' ');
@@ -262,7 +265,7 @@ function calHTML(){
       <div class="cal-sum"><span>${esc(venueLabel(x.venue))}</span><span>${fmt(toMin(x.start))}–${fmt(toMin(x.end))}</span><span>${(x.attendees||[]).length} ticked as coming</span>${x.published?`<span>${yes} coming${late?` (${late} late or leaving early)`:''} · ${no} can't</span>`:''}</div>
       <div class="row"><button class="primary" data-act="openPlan" data-date="${sel}">View plan</button></div></section>`}
   else panel=`<section class="card"><h2>${esc(pretty(sel))}</h2><p class="muted" style="margin:0">No plan for this day yet.${(dow(sel)===3||dow(sel)===5)?'':' It isn\'t a usual training day.'}</p><div class="row"><button class="primary" data-act="openPlan" data-date="${sel}">Make a plan</button></div></section>`;
-  const today2=iso(new Date());
+  const today2=sgToday();
   const up=Object.values(S.sessions).filter(v=>v.date>=today2).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,6);
   const upcoming=`<section class="card"><h2>Coming up</h2>${up.length?`<div class="saved">${up.map(v=>`<button data-act="calPick" data-date="${v.date}" aria-current="${v.date===sel}"><span>${esc(pretty(v.date))} · ${esc(venueLabel(v.venue))}</span><span class="muted small">${v.published?'posted':'draft'}</span></button>`).join('')}</div>`:'<p class="muted small" style="margin:0">No upcoming plans. Pick a day on the calendar to make one.</p>'}</section>`;
   const unsaved=S.draft&&S.dirty?`<div class="banner">You have unsaved changes on ${esc(pretty(S.draft.date))}. <button class="ghost" data-act="openPlan" data-date="${S.draft.date}">Go back to it</button></div>`:'';
@@ -286,7 +289,7 @@ function postHTML(d){
   if(!telegramEnabled)return '';
   const live=S.sessions[d.date];const ready=live&&live.published&&!S.dirty;const at=live&&live.announcedAt;
   return `<div class="row post-row"><button data-act="announce"${ready&&!S.posting?'':' disabled'}>${S.posting?'Posting…':S.confirm==='announce'?'Tap again to post it again':at?'Post to the group again':'Post to the Telegram group'}</button>
-    <span class="small muted">${!live||!live.published?'Tick "Members can see this training" and save first.':S.dirty?'Save your changes first.':at?`Posted ${esc(new Date(at).toLocaleString('en-SG',{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit'}))}.`:'The bot posts the date, time and venue with a button to reply.'}</span></div>`;
+    <span class="small muted">${!live||!live.published?'Tick "Members can see this training" and save first.':S.dirty?'Save your changes first.':at?`Posted ${esc(new Date(at).toLocaleString('en-SG',{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit',timeZone:'Asia/Singapore'}))}.`:'The bot posts the date, time and venue with a button to reply.'}</span></div>`;
 }
 function isOwner(){return !!(S.user&&owner&&S.user.uid===owner)}
 function excosHTML(){
@@ -323,13 +326,13 @@ function rsvpSummary(d,list){
 // Replies changed in the 6 hours before a training starts, for trainings in the next 2 days.
 function lastMinute(){
   const now=Date.now(),out=[];
-  for(const x of Object.values(S.sessions)){if(!x.published)continue;const st=new Date(x.date+'T'+(x.start||'15:30')+':00').getTime();if(st<now-3*3600e3||st>now+48*3600e3)continue;
+  for(const x of Object.values(S.sessions)){if(!x.published)continue;const st=Date.parse(x.date+'T'+(x.start||'15:30')+':00+08:00');if(st<now-3*3600e3||st>now+48*3600e3)continue;
     for(const [id,v] of Object.entries(S.rinfo[x.date]||{})){const at=Date.parse(v.at);if(!(at>=st-6*3600e3))continue;const r=reply(x.date,id);if(r.status==='yes'&&!r.prev)continue;
       const m=S.members.find(m=>m.id===id);if(m)out.push({x,m,r,at})}}
   return out.sort((a,b)=>b.at-a.at);
 }
 function lastMinuteHTML(){const l=lastMinute();if(!l.length)return '';
-  return `<section class="card lastmin"><div class="card-h"><h2>Last-minute changes</h2><span class="small muted">in the 6 hours before training</span></div><div class="list">${l.slice(0,12).map(({x,m,r,at})=>`<div class="li"><div><div class="nm">${esc(m.name)} <span class="pill ${r.status==='no'?'bad':r.status==='yes'?'good':'warn'}" style="padding:0 6px;font-size:11px">${esc(STATUS[r.status])}</span>${r.prev&&r.prev!==r.status?` <span class="small muted">was ${esc(STATUS[r.prev].toLowerCase())}</span>`:''}</div><div class="small muted">${esc(pretty(x.date))} · ${new Date(at).toLocaleString('en-SG',{weekday:'short',hour:'numeric',minute:'2-digit'})}${replyNote(r)?' · '+esc(replyNote(r)):''}</div></div></div>`).join('')}</div></section>`}
+  return `<section class="card lastmin"><div class="card-h"><h2>Last-minute changes</h2><span class="small muted">in the 6 hours before training</span></div><div class="list">${l.slice(0,12).map(({x,m,r,at})=>`<div class="li"><div><div class="nm">${esc(m.name)} <span class="pill ${r.status==='no'?'bad':r.status==='yes'?'good':'warn'}" style="padding:0 6px;font-size:11px">${esc(STATUS[r.status])}</span>${r.prev&&r.prev!==r.status?` <span class="small muted">was ${esc(STATUS[r.prev].toLowerCase())}</span>`:''}</div><div class="small muted">${esc(pretty(x.date))} · ${new Date(at).toLocaleString('en-SG',{weekday:'short',hour:'numeric',minute:'2-digit',timeZone:'Asia/Singapore'})}${replyNote(r)?' · '+esc(replyNote(r)):''}</div></div></div>`).join('')}</div></section>`}
 function dots(n){return `<span class="dots" aria-label="Level ${n} of 5">${[1,2,3,4,5].map(i=>`<i class="${i<=n?'on':''}"></i>`).join('')}</span>`}
 
 function membersHTML(){
@@ -569,7 +572,7 @@ const A={
   open({date}){location.hash='plan/'+date},
   calPick({date}){S.calSel=date;S.calMonth=date.slice(0,7)},
   calMove({n}){const [y,m]=S.calMonth.split('-').map(Number);const d=new Date(y,m-1+(+n),1);S.calMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`},
-  calToday(){const t=iso(new Date());S.calMonth=t.slice(0,7);S.calSel=t},
+  calToday(){const t=sgToday();S.calMonth=t.slice(0,7);S.calSel=t},
   openPlan({date}){location.hash='plan/'+date},
   backCal(){if(S.draft)S.calSel=S.draft.date;location.hash='plan'},
   copyCode({code}){copyText(code,'Code copied')},
@@ -594,7 +597,9 @@ const A={
     catch(e){toast(e&&e.message==='no_chat'?"The bot doesn't have a group to post to yet.":"Couldn't post it. Try again.")}
     S.posting=false;render()},
   async exDel({id}){if(!armConfirm('ex'+id))return;await write(()=>S.db.doc('admins/'+id).delete(),'Exco removed');render()},
-  async save(){const d=clone(S.draft);d.updatedAt=new Date().toISOString();if(await write(()=>S.db.doc('sessions/'+d.date).set(d),'Plan saved')){S.dirty=false;S.blocksEdited=true;render()}},
+  async save(){const d=clone(S.draft);d.updatedAt=new Date().toISOString();
+    // Keep the bot's "posted" time even if this page was opened before the training was posted.
+    const live=S.sessions[d.date];if(live&&live.announcedAt)d.announcedAt=live.announcedAt;if(await write(()=>S.db.doc('sessions/'+d.date).set(d),'Plan saved')){S.dirty=false;S.blocksEdited=true;render()}},
   async delsess(){if(!armConfirm('delsess'))return;const date=S.draft.date;if(await write(()=>S.db.doc('sessions/'+date).delete(),'Plan deleted')){S.dirty=true;render()}},
   copy(){const txt=planText();const done=()=>toast('Plan copied. Paste it into the group chat.');
     const fallback=()=>{S.paste=S.paste;const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}ta.remove();ok?done():toast("Couldn't copy here. Try from a browser.")};

@@ -37,7 +37,7 @@ export async function telegramProfile() {
   return { name: saved.name || '', username: claims.tgUsername || '' };
 }
 // Tells the excos' Telegram chat about a last-minute reply change. The Worker reads the reply itself and
-// only posts real changes made in the 24 hours before a training, so this can't be used to send anything else.
+// only posts real changes made in the 6 hours before a training, so this can't be used to send anything else.
 export function notifyExcos(date, memberId) {
   if (!telegram.authUrl) return;
   fetch(telegram.authUrl.replace(/\/auth\/telegram$/, '/notify'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, memberId }) }).catch(() => {});
