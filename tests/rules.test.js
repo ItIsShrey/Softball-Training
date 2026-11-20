@@ -2,7 +2,7 @@
 import { test, before, after, beforeEach } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
 
 const OWNER = 'tg:834667219';
 const EXCO = 'tg:100';
@@ -109,31 +109,57 @@ test('the owner is an exco even without an admins entry', async () => {
   await assertSucceeds(getDocs(collection(as(OWNER), 'members')));
 });
 
+// A reply plus its private note (time and reason), written together as the member page does.
+const note = (over = {}) => ({ date: DATE, memberId: 'm1', reason: 'class until 4', uid: MEMBER, at: '2030-01-07T10:00:00Z', ...over });
+async function save(db, r, n) {
+  const b = writeBatch(db);
+  const id = `${r.date}_${r.memberId}`;
+  n ? b.set(doc(db, 'rsvpNotes', id), n) : b.delete(doc(db, 'rsvpNotes', id));
+  b.set(doc(db, 'rsvps', id), r);
+  return b.commit();
+}
+
 test('members reply yes, no, late or early for themselves', async () => {
   const db = as(MEMBER);
-  const ref = doc(db, 'rsvps', `${DATE}_m1`);
-  await assertSucceeds(setDoc(ref, reply()));
-  await assertSucceeds(setDoc(ref, reply({ status: 'late', time: '16:30', reason: 'class until 4', prev: 'yes' })));
-  await assertSucceeds(setDoc(ref, reply({ status: 'early', time: '17:00', reason: 'work', prev: 'late' })));
-  await assertFails(setDoc(ref, reply({ status: 'maybe' })));
-  await assertFails(setDoc(ref, reply({ status: 'no', going: true })));
-  await assertFails(setDoc(doc(db, 'rsvps', `${DATE}_m2`), reply({ memberId: 'm2' })));
-  await assertFails(setDoc(doc(db, 'rsvps', `${DRAFT}_m1`), reply({ date: DRAFT })));
+  await assertSucceeds(save(db, reply()));
+  await assertSucceeds(save(db, reply({ status: 'late', prev: 'yes' }), note({ time: '16:30' })));
+  await assertSucceeds(save(db, reply({ status: 'early', prev: 'late' }), note({ time: '17:00', reason: 'work' })));
+  await assertFails(save(db, reply({ status: 'maybe' })));
+  await assertFails(save(db, reply({ status: 'no', going: true })));
+  await assertFails(save(db, reply({ memberId: 'm2' })));
+  await assertFails(save(db, reply({ date: DRAFT })));
+  await assertFails(save(db, reply({ at: 'x'.repeat(41) })));
 });
 
-test('late and early need a reason', async () => {
-  const ref = doc(as(MEMBER), 'rsvps', `${DATE}_m1`);
-  await assertFails(setDoc(ref, reply({ status: 'late', time: '16:30' })));
-  await assertFails(setDoc(ref, reply({ status: 'early', reason: '' })));
-  await assertFails(setDoc(ref, reply({ status: 'late', reason: 'x'.repeat(201) })));
+test('late and early need a reason, kept in the private note', async () => {
+  const db = as(MEMBER);
+  await assertFails(save(db, reply({ status: 'late' })));
+  await assertFails(save(db, reply({ status: 'early' }), note({ reason: '' })));
+  await assertFails(save(db, reply({ status: 'late' }), note({ reason: 'x'.repeat(201) })));
+  await assertFails(save(db, reply({ status: 'late', reason: 'class' })));
 });
 
 test('changing a yes to a no needs a reason; a first no does not', async () => {
-  const ref = doc(as(MEMBER), 'rsvps', `${DATE}_m1`);
-  await assertSucceeds(setDoc(ref, reply({ status: 'no', going: false })));
-  await assertSucceeds(setDoc(ref, reply()));
-  await assertFails(setDoc(ref, reply({ status: 'no', going: false, prev: 'yes' })));
-  await assertSucceeds(setDoc(ref, reply({ status: 'no', going: false, prev: 'yes', reason: 'fell sick' })));
+  const db = as(MEMBER);
+  await assertSucceeds(save(db, reply({ status: 'no', going: false })));
+  await assertSucceeds(save(db, reply()));
+  await assertFails(save(db, reply({ status: 'no', going: false, prev: 'yes' })));
+  await assertSucceeds(save(db, reply({ status: 'no', going: false, prev: 'yes' }), note({ reason: 'fell sick' })));
+});
+
+test('reasons are private: only the member and excos read them', async () => {
+  await assertSucceeds(save(as(MEMBER), reply({ status: 'late' }), note()));
+  await env.withSecurityRulesDisabled(async ctx => {
+    await setDoc(doc(ctx.firestore(), 'claims', 'tg:201'), { memberId: 'm2', via: 'username' });
+  });
+  const other = as('tg:201');
+  await assertSucceeds(getDoc(doc(other, 'rsvps', `${DATE}_m1`)));
+  await assertFails(getDoc(doc(other, 'rsvpNotes', `${DATE}_m1`)));
+  await assertFails(getDocs(collection(other, 'rsvpNotes')));
+  await assertSucceeds(getDoc(doc(as(MEMBER), 'rsvpNotes', `${DATE}_m1`)));
+  await assertSucceeds(getDocs(query(collection(as(MEMBER), 'rsvpNotes'), where('memberId', '==', 'm1'))));
+  await assertSucceeds(getDoc(doc(as(EXCO), 'rsvpNotes', `${DATE}_m1`)));
+  await assertFails(setDoc(doc(other, 'rsvpNotes', `${DATE}_m1`), note({ uid: 'tg:201' })));
 });
 
 test('a member who is not linked cannot reply', async () => {

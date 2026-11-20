@@ -20,3 +20,10 @@ FIREBASE_PROJECT_ID = "softball-training-a2e32"
 #   BOT_TOKEN              token from @BotFather
 #   FIREBASE_CLIENT_EMAIL  client_email from the Firebase service account JSON
 #   FIREBASE_PRIVATE_KEY   private_key from the same JSON
+
+# Rate limit per visitor IP for login, alerts and posts: 30 requests a minute per endpoint (free on Workers).
+[[unsafe.bindings]]
+name = "LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }
