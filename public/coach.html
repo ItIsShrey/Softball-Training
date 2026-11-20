@@ -9,22 +9,23 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="css/app.css">
 </head>
-<body>
+<body class="coach">
 <header class="top"><div class="wrap">
-  <div class="brand"><span class="ball" aria-hidden="true"></span>Session Planner</div>
+  <div class="brand"><span class="ball" aria-hidden="true"></span><span>SMU Softball <small>Planner</small></span></div>
   <nav class="tabs" aria-label="Sections">
-    <a href="#plan" data-tab="plan">Plan</a>
-    <a href="#members" data-tab="members">Members</a>
-    <a href="#drills" data-tab="drills">Drills</a>
-    <a href="index.html">Member view</a>
-    <a href="#" id="signout" data-act="signout" hidden>Sign out</a>
+    <a href="#plan" data-tab="plan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg><span>Plan</span></a>
+    <a href="#members" data-tab="members"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M18.5 14.8c1.5.8 2.6 2.5 3 5.2"/></svg><span>Members</span></a>
+    <a href="#drills" data-tab="drills"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5h11M9 12h11M9 19h11"/><circle cx="4.5" cy="5" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="19" r="1.2"/></svg><span>Drills</span></a>
+    <a href="index.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 9.8V20h13V9.8"/></svg><span>Member view</span></a>
   </nav>
+  <button class="ghost" id="signout" data-act="signout" hidden>Sign out</button>
 </div></header>
 <main class="wrap" id="app"><div class="card"><h2>Loading team data</h2><p class="muted">Members, drills and saved plans will appear here in a moment.</p></div></main>
 <div class="toast" id="toast" hidden></div>
 
 <script type="module">
 import { db, auth, configured, currentUser, logOut, telegramEnabled, owner, announceTraining } from './js/store.js';
+import { avatar } from './js/ui.js';
 const VENUES=[{id:'MPSH',label:'MPSH (hall)',kind:'MPSH',from:'15:30',to:'18:00'},{id:'Kallang',label:'Kallang field',kind:'Field',from:'15:30',to:'18:00'},{id:'Jurong',label:'Jurong field',kind:'Field',from:'15:30',to:'18:00'}];
 const venueOf=id=>VENUES.find(v=>v.id===id)||VENUES[0];
 /* problems with the venue's booked slot, as sentences */
@@ -58,9 +59,10 @@ const blockMin=b=>b.kind==='rotation'?(+b.per||0)*b.stations.length:(+b.minutes|
 const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 const byOrder=(a,b)=>(a.order??0)-(b.order??0)||String(a.name).localeCompare(b.name);
 
+const av=(m,size=28)=>m?avatar(m.name,S.photos[m.id],size,m.id):'';
 function nextTraining(){for(let i=0;i<7;i++){const d=sgDate(Date.now()+i*864e5);if(dow(d)===3||dow(d)===5)return d}return sgToday()}
 
-const S={db:null,user:null,links:{},roster:{},rsvps:{},rinfo:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
+const S={db:null,user:null,photos:{},links:{},roster:{},rsvps:{},rinfo:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
   members:[],drills:[],sessions:{},view:'plan',draft:null,dirty:false,blocksEdited:false,
   mf:null,df:null,paste:'',pasteMsg:'',confirm:null,admins:[],reqs:[],exCode:'',exName:'',planDate:null,calMonth:null,calSel:null};
 S.calSel=nextTraining();S.calMonth=S.calSel.slice(0,7);
@@ -139,7 +141,7 @@ function present(d){return d.attendees.map(id=>S.members.find(m=>m.id===id)).fil
 /* ---------- rendering ---------- */
 function render(){
   document.querySelectorAll('[data-tab]').forEach(a=>a.setAttribute('aria-current',a.dataset.tab===S.view?'page':'false'));
-  const mt=document.querySelector('[data-tab="members"]');if(mt)mt.innerHTML='Members'+(S.reqs.length?` <span class="badge">${S.reqs.length}</span>`:'');
+  const mt=document.querySelector('[data-tab="members"]');if(mt){const b=mt.querySelector('.badge');if(b)b.remove();if(S.reqs.length)mt.insertAdjacentHTML('beforeend',`<span class="badge">${S.reqs.length}</span>`)}
   const app=$('#app');
   const so=$('#signout');if(so)so.hidden=!S.user;
   if(S.status==='loading')return;
@@ -189,7 +191,7 @@ function planHTML(){
       ${rsvpSummary(d,list)}
       <div class="att-bar"><input id="att-q" data-input="attQ" value="${esc(S.attQ||'')}" placeholder="Find a player" autocomplete="off" aria-label="Find a player">
         <div class="seg" role="group" aria-label="Show">${[['coming','Coming',ppl.length],['yes','Replied coming',list.filter(m=>(S.rsvps[d.date]||{})[m.id]===true).length],['all','All',list.length]].map(([k,l,n])=>`<button data-act="attF" data-v="${k}" aria-pressed="${!q&&af===k}">${l} <span class="muted">${n}</span></button>`).join('')}</div></div>
-      <div class="chips att">${shown.map(m=>{const rv=(S.rsvps[d.date]||{})[m.id];return `<button class="chip" data-act="toggle" data-id="${esc(m.id)}" aria-pressed="${d.attendees.includes(m.id)}">${rsMark(d.date,m.id)}${esc(m.name)}<span class="lvl">L${m.level||'?'}</span></button>`}).join('')}</div>
+      <div class="chips att">${shown.map(m=>{const rv=(S.rsvps[d.date]||{})[m.id];return `<button class="chip" data-act="toggle" data-id="${esc(m.id)}" aria-pressed="${d.attendees.includes(m.id)}">${av(m,24)}${rsMark(d.date,m.id)}${esc(m.name)}<span class="lvl">L${m.level||'?'}</span></button>`}).join('')}</div>
       ${shown.length?'':`<p class="small muted" style="margin:0">${q?'No player matches that name.':af==='coming'?'Nobody ticked yet. Pick All to choose players.':'Nobody here yet.'}</p>`}
       <details${S.paste?' open':''}><summary class="small">Paste names from a Telegram poll</summary>
         <div style="display:grid;gap:8px"><textarea id="paste" data-input="paste" placeholder="One name per line, as they appear in the poll voters list">${esc(S.paste)}</textarea>
@@ -205,7 +207,7 @@ function planHTML(){
       <div class="teams">${Array.from({length:d.numTeams},(_,t)=>{const r=teamRoster(d,t);const a=avg(r.map(m=>m.level||0));
         return `<div class="team t${t}"><div class="team-h"><h3>Team ${TEAM[t]}</h3><span class="small muted">${r.length} players${gCount(r)}</span></div>
         <div><div class="row small" style="justify-content:space-between"><span class="muted">Avg level</span><b style="font-family:var(--mono)">${r.length?a.toFixed(1):'–'}</b></div><div class="meter"><i style="width:${a/5*100}%"></i></div></div>
-        <div class="plist">${r.map(m=>`<button data-act="move" data-id="${esc(m.id)}" title="Move to the next team"><span>${esc(m.name)} <span class="pos">${esc([m.gender,...(m.pos||[])].filter(Boolean).join(' '))}</span></span><span class="lvl">L${m.level||'?'}</span></button>`).join('')||'<span class="small muted">Nobody yet</span>'}</div></div>`}).join('')}</div>
+        <div class="plist">${r.map(m=>`<button data-act="move" data-id="${esc(m.id)}" title="Move to the next team"><span class="person" style="gap:8px">${av(m,22)}<span>${esc(m.name)} <span class="pos">${esc([m.gender,...(m.pos||[])].filter(Boolean).join(' '))}</span></span></span><span class="lvl">L${m.level||'?'}</span></button>`).join('')||'<span class="small muted">Nobody yet</span>'}</div></div>`}).join('')}</div>
       <p class="small muted" style="margin:0">Squad average ${overall.toFixed(1)}${gCount(ppl)}. Tap a player to move them to the next team.</p>
     </section>`;
   }
@@ -355,10 +357,10 @@ function membersHTML(){
       <div class="seg" role="group" aria-label="Gender">${GENDER.map(([k,l])=>`<button data-act="mgender" data-g="${k}" aria-pressed="${f.gender===k}">${l}</button>`).join('')}</div></div>
     <div style="display:grid;gap:6px"><span class="eyebrow">Positions</span>
       <div class="chips">${POS.map(([k,l])=>`<button class="chip" data-act="mpos" data-p="${k}" aria-pressed="${f.pos.includes(k)}">${l}</button>`).join('')}</div></div>
-    <div class="row"><button class="primary" data-act="msave"${S.readOnly?' disabled':''}>${f.id?'Save changes':'Add member'}</button>${f.id?'<button data-act="mcancel">Cancel</button>':''}</div>
+    <div class="row"><button class="primary" data-act="msave"${S.readOnly?' disabled':''}>${f.id?'Save changes':'Add member'}</button>${f.id?`<button data-act="mcancel">Cancel</button><button class="ghost danger" data-act="mdel" data-id="${esc(f.id)}" style="margin-left:auto">${S.confirm==='m'+f.id?'Tap again to delete':'Delete member'}</button>`:''}</div>
   </section>`;
-  const list=`<section class="card"><h2>Roster</h2>${ms.length?`<div class="list">${ms.map(m=>`<div class="li"><div><div class="nm">${esc(m.name)}${m.tg?` <span class="muted small" style="font-weight:400">@${esc(m.tg)}</span>`:''}</div><div class="small muted">${S.links[m.id]?'<span class="pill good" style="padding:0 6px;font-size:11px">Telegram</span> ':''}${S.links[m.id]?'':'<span class="pill" style="padding:0 6px;font-size:11px;color:var(--muted)">not linked</span> '}${dots(m.level||0)} ${esc(LEVELS[m.level]||'')}${m.gender?' · '+esc((GENDER.find(x=>x[0]===m.gender)||[,''])[1]):''}${(m.pos||[]).length?' · '+esc(m.pos.map(p=>(POS.find(x=>x[0]===p)||[,p])[1]).join(', ')):''}</div></div>
-      <div class="row"><button class="ghost" data-act="medit" data-id="${esc(m.id)}">Edit</button><button class="ghost danger" data-act="mdel" data-id="${esc(m.id)}">${S.confirm==='m'+m.id?'Tap again':'Delete'}</button></div></div>`).join('')}</div>`
+  const list=`<section class="card"><div class="card-h"><h2>Roster</h2><span class="small muted">${ms.length} members</span></div>${ms.length?`<div class="list">${ms.map(m=>`<div class="li"><div class="person">${av(m,38)}<div><div class="nm">${esc(m.name)}${m.tg?` <span class="muted small" style="font-weight:500">@${esc(m.tg)}</span>`:''}</div><div class="small muted">${S.links[m.id]?'<span class="pill good" style="padding:1px 7px;font-size:11px">Linked</span> ':''}${dots(m.level||0)} ${esc(LEVELS[m.level]||'')}${m.gender?' · '+esc((GENDER.find(x=>x[0]===m.gender)||[,''])[1]):''}${(m.pos||[]).length?' · '+esc(m.pos.map(p=>(POS.find(x=>x[0]===p)||[,p])[1]).join(', ')):''}</div></div></div>
+      <div class="row"><button class="ghost" data-act="medit" data-id="${esc(m.id)}">Edit</button></div></div>`).join('')}</div>`
     :'<div class="empty">Your roster is empty. Add each player with a level from 1 (new) to 5 (standout) so teams can be balanced.</div>'}</section>`;
   const nouser=ms.filter(m=>!m.tg).length;
   const tgCard=`<section class="card"><div class="card-h"><h2>Telegram usernames</h2><span class="small muted">${ms.length-nouser} of ${ms.length} added</span></div>
@@ -706,6 +708,7 @@ function start(){
   db.collection('claims').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();if(x.id.startsWith('tg:'))o[v.memberId]=x.id});S.links=o;if(S.status==='ok')render()},()=>{});
   db.collection('linkRequests').onSnapshot(s=>{S.reqs=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>String(a.at).localeCompare(String(b.at)));if(S.status==='ok')render()},()=>{});
   db.collection('admins').onSnapshot(s=>{S.admins=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>(adminName(a)||a.id).localeCompare(adminName(b)||b.id));if(S.status==='ok')render()},()=>{});
+  db.collection('photos').onSnapshot(s=>{S.photos=Object.fromEntries(s.docs.map(x=>[x.id,x.data().src||'']));if(S.status==='ok')render()},()=>{});
   db.collection('rsvps').onSnapshot(s=>{const o={},inf={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]=v.going;(inf[v.date]=inf[v.date]||{})[v.memberId]=v});S.rsvps=o;S.rinfo=inf;if(S.status==='ok')render()},fail);
 }
 (async()=>{

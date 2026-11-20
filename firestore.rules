@@ -100,6 +100,22 @@ service cloud.firestore {
       );
     }
 
+    // Profile photos, one per member: a small image saved in the page, their Telegram photo, or '' when removed.
+    // Linked members see them; a member changes only their own, and excos can change any.
+    function photoOk(d) {
+      return d.keys().hasOnly(['src', 'by', 'at'])
+        && d.by == request.auth.uid
+        && d.src is string && d.src.size() <= 40000
+        && (d.src == ''
+          || d.src.matches('data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+')
+          || d.src.matches('https://t[.]me/i/userpic/[^"<> ]+'));
+    }
+    match /photos/{memberId} {
+      allow read: if isAdmin() || isLinked();
+      allow create, update: if (isAdmin() || (isLinked() && claimedMember() == memberId)) && photoOk(request.resource.data);
+      allow delete: if isAdmin() || (isLinked() && claimedMember() == memberId);
+    }
+
     // The Worker marks each exco alert it has sent here, so one change is never posted twice. No page access.
     match /notified/{id} { allow read, write: if false; }
   }
