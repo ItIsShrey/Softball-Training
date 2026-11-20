@@ -161,3 +161,20 @@ test('nobody can read or write the alert markers', async () => {
   await assertFails(getDoc(doc(as(OWNER), 'notified', 'x')));
   await assertFails(setDoc(doc(as(OWNER), 'notified', 'x'), { at: 1 }));
 });
+
+test('members set only their own photo, and only a small image or their Telegram photo', async () => {
+  const db = as(MEMBER);
+  const img = 'data:image/jpeg;base64,' + 'A'.repeat(1000);
+  await assertSucceeds(setDoc(doc(db, 'photos', 'm1'), { src: img, by: MEMBER, at: 'now' }));
+  await assertSucceeds(setDoc(doc(db, 'photos', 'm1'), { src: 'https://t.me/i/userpic/320/abc.jpg', by: MEMBER, at: 'now' }));
+  await assertSucceeds(setDoc(doc(db, 'photos', 'm1'), { src: '', by: MEMBER, at: 'now' }));
+  await assertSucceeds(getDoc(doc(db, 'photos', 'm2')));
+  await assertFails(setDoc(doc(db, 'photos', 'm2'), { src: img, by: MEMBER, at: 'now' }));
+  await assertFails(setDoc(doc(db, 'photos', 'm1'), { src: 'javascript:alert(1)', by: MEMBER, at: 'now' }));
+  await assertFails(setDoc(doc(db, 'photos', 'm1'), { src: 'https://evil.example/x.png', by: MEMBER, at: 'now' }));
+  await assertFails(setDoc(doc(db, 'photos', 'm1'), { src: 'data:image/svg+xml;base64,AAAA', by: MEMBER, at: 'now' }));
+  await assertFails(setDoc(doc(db, 'photos', 'm1'), { src: 'data:image/jpeg;base64,' + 'A'.repeat(40000), by: MEMBER, at: 'now' }));
+  await assertFails(setDoc(doc(db, 'photos', 'm1'), { src: img, by: OWNER, at: 'now' }));
+  await assertFails(getDoc(doc(as(NEWBIE), 'photos', 'm1')));
+  await assertSucceeds(setDoc(doc(as(EXCO), 'photos', 'm2'), { src: img, by: EXCO, at: 'now' }));
+});

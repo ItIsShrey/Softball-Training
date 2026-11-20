@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#1d6a46">
+<meta name="theme-color" content="#1a2266">
 <title>SMU Softball Trainings</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,41 +13,65 @@
 /* Member view: one phone-width column of training cards, big tap targets for replying. */
 main.member{max-width:560px}
 .who{display:grid;gap:6px}
-.who button{text-align:left;padding:12px 14px;font-size:16px;font-weight:500}
+.who button{justify-content:flex-start;text-align:left;padding:12px 14px;font-size:16px;font-weight:500;min-height:48px}
 .who button[aria-pressed="true"]{background:var(--field);border-color:var(--field);color:var(--field-ink)}
-input.big{font-size:18px;padding:12px 14px}
-.tr-date{font-family:var(--display);font-weight:800;font-size:23px;line-height:1;text-transform:uppercase}
-.tr-meta{display:flex;gap:6px 14px;flex-wrap:wrap;color:var(--muted);font-size:14px}
+input.big{font-size:18px;padding:12px 14px;min-height:50px}
+.hello{display:flex;align-items:center;gap:12px}
+.hello .hi{font-family:var(--display);font-weight:700;font-size:20px;line-height:1.15}
+.hello .row{margin-left:auto;gap:6px}
+.hello .avbtn{padding:0;min-height:0;border:0;background:none;border-radius:50%}
+.tr{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center}
+.dtile{display:grid;justify-items:center;width:60px;padding:7px 0 8px;border-radius:14px;background:var(--tint);color:var(--field);line-height:1}
+.dtile .dw{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.dtile .dn{font-family:var(--display);font-weight:700;font-size:26px;margin:3px 0 2px;color:var(--ink)}
+.dtile .dm{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.tr-title{font-family:var(--display);font-weight:700;font-size:17px;line-height:1.2}
+.tr-meta{display:flex;gap:4px 12px;flex-wrap:wrap;color:var(--muted);font-size:14px;margin-top:3px}
+.tr-meta span{display:inline-flex;align-items:center;gap:5px}
+.tr-meta svg{width:15px;height:15px;flex:none;opacity:.8}
 .rsvp{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.rsvp button{padding:14px 10px;font-size:16px;border-radius:10px;border-width:2px}
-.rsvp .y[aria-pressed="true"]{background:var(--good);border-color:var(--good);color:var(--surface)}
-.rsvp .n[aria-pressed="true"]{background:var(--bad);border-color:var(--bad);color:var(--surface)}
+.rsvp button{padding:13px 10px;min-height:52px;font-size:16px;border-radius:14px;border-width:1.5px}
+.rsvp .y[aria-pressed="true"]{background:var(--good);border-color:var(--good);color:var(--on-status)}
+.rsvp .n[aria-pressed="true"]{background:var(--bad);border-color:var(--bad);color:var(--on-status)}
 .rsvp2{display:flex;gap:8px;flex-wrap:wrap}
-.rsvp2 button{flex:1;padding:9px 10px;font-size:14px}
-.rsvp2 button[aria-pressed="true"]{background:color-mix(in srgb,var(--warn) 18%,var(--surface));border-color:var(--warn)}
-.rform{display:grid;gap:10px;padding:12px;border-radius:10px;background:var(--sunk);border:1px solid var(--line)}
-.rform .g{display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px}
-.mynote{font-size:14px;color:var(--muted)}
-.myteam{border-radius:10px;padding:12px;display:grid;gap:8px;background:var(--sunk);border:1px solid var(--line);border-left:5px solid var(--tc)}
-.myteam.t0{border-left-color:var(--ta)} .myteam.t1{border-left-color:var(--tb)}
-.big-line{font-size:17px;font-weight:700}
-.plan-row{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:14px}
+.rsvp2 button{flex:1;padding:8px 10px;font-size:14px;border-radius:12px}
+.rsvp2 button[aria-pressed="true"]{background:var(--warn-bg);border-color:var(--warn);color:var(--warn)}
+.rform{display:grid;gap:10px;padding:14px;border-radius:14px;background:var(--sunk);border:1px solid var(--line)}
+.rform .g{display:grid;grid-template-columns:130px minmax(0,1fr);gap:8px}
+.mynote{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px;color:var(--muted);padding:10px 12px;border-radius:12px;background:var(--sunk)}
+.going{display:flex;align-items:center;gap:10px}
+.going summary{flex:1}
+.going-list{display:flex;flex-wrap:wrap;gap:6px}
+.going-list .chip{padding:3px 10px 3px 3px;font-size:13px;min-height:30px}
+.going-list .chip .av{margin-left:0}
+.myteam{border-radius:14px;padding:14px;display:grid;gap:8px;background:color-mix(in srgb,var(--tc) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--tc) 35%,transparent)}
+.myteam.t0{background:color-mix(in srgb,var(--ta) 10%,var(--surface));border-color:color-mix(in srgb,var(--ta) 35%,transparent)}
+.myteam.t1{background:color-mix(in srgb,var(--tb) 10%,var(--surface));border-color:color-mix(in srgb,var(--tb) 35%,transparent)}
+.myteam .tname{display:inline-flex;align-items:center;gap:8px;font-family:var(--display);font-weight:700;font-size:16px}
+.myteam .tname::before{content:"";width:12px;height:12px;border-radius:4px;background:var(--tc)}
+.myteam.t0 .tname::before{background:var(--ta)} .myteam.t1 .tname::before{background:var(--tb)}
+.myteam.plain{background:var(--sunk);border-color:var(--line)}
+.plan-row{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
 .plan-row:first-child{border-top:0}
 .plan-row .time{padding-top:1px}
 .names{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:14px}
-.me-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
-.me-bar .row{gap:6px}
+.prof{display:flex;align-items:center;gap:14px}
+.prof .nm{font-family:var(--display);font-weight:700;font-size:17px}
+.photo-btns{display:flex;gap:8px;flex-wrap:wrap}
+.photo-btns label{cursor:pointer}
+.photo-btns input{display:none}
 </style>
 </head>
 <body>
 <header class="top"><div class="wrap">
-  <div class="brand"><span class="ball" aria-hidden="true"></span>SMU Softball</div>
+  <div class="brand"><span class="ball" aria-hidden="true"></span><span>SMU Softball</span></div>
 </div></header>
 <main class="wrap member" id="app"><section class="card"><h2>Loading trainings</h2><p class="muted">Upcoming trainings will show here in a moment.</p></section></main>
 <div class="toast" id="toast" hidden></div>
 
 <script type="module">
 import { db, auth, configured, currentUser, logOut, telegramEnabled, signInTelegram, mountTelegramButton, telegramProfile, notifyExcos } from './js/store.js';
+import { avatar, shrinkPhoto, safePhoto } from './js/ui.js';
 
 const VENUES={MPSH:'MPSH (hall)',Kallang:'Kallang field',Jurong:'Jurong field'};
 const TEAM=['A','B','C'];
@@ -59,6 +83,8 @@ const fmt=m=>{const h=Math.floor(m/60),mm=((m%60)+60)%60;return (((h+11)%12)+1)+
 const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const pretty=s=>new Date(s+'T12:00:00Z').toLocaleDateString('en-SG',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'});
 // Trainings are in Singapore, so "today" and start times are Singapore time whatever the phone is set to.
+const dpart=(s,k)=>new Date(s+'T12:00:00Z').toLocaleDateString('en-SG',{[k]:k==='day'?'numeric':'short',timeZone:'UTC'});
+const whenLabel=d=>{const n=Math.round((Date.parse(d)-Date.parse(sgToday()))/864e5);return n<=0?'Today':n===1?'Tomorrow':n<7?new Date(d+'T12:00:00Z').toLocaleDateString('en-SG',{weekday:'long',timeZone:'UTC'}):'In '+n+' days'};
 const sgToday=()=>new Date(Date.now()+8*3600e3).toISOString().slice(0,10);
 const blockMin=b=>b.kind==='rotation'?(+b.per||0)*(b.stations||[]).length:(+b.minutes||0);
 const ordinal=n=>n+(['th','st','nd','rd'][(n%100-20)%10]||['th','st','nd','rd'][n%100]||'th');
@@ -66,7 +92,7 @@ const firstName=n=>{n=String(n||'');if(n.includes(','))return n.split(',')[1].tr
 const norm=s=>String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();
 
 const NEXT=new URLSearchParams(location.search).get('next');
-const M={admin:false,showProfile:false,req:null,uid:null,me:null,roster:{},sessions:[],rsvps:{},q:'',pick:null,err:'',busy:false,open:{},form:null};
+const M={photos:{},photosLoaded:false,admin:false,showProfile:false,req:null,uid:null,me:null,roster:{},sessions:[],rsvps:{},q:'',pick:null,err:'',busy:false,open:{},form:null};
 function copyText(txt){const done=()=>toast('Code copied');
   const fallback=()=>{const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}ta.remove();ok?done():toast("Couldn't copy. Press and hold the code to copy it.")};
   try{navigator.clipboard.writeText(txt).then(done,fallback)}catch(e){fallback()}}
@@ -117,35 +143,42 @@ function loginHTML(){
   </section>${profileHTML()}`;
 }
 
+const meAv=size=>avatar(M.roster[M.me]||'?',M.photos[M.me],size,M.me||'');
+const ICON={pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-5.6 7-11.5a7 7 0 1 0-14 0C5 15.4 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
+  clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'};
 function profileHTML(){
+  const photo=M.me&&safePhoto(M.photos[M.me]);
   return `<section class="card"><h2>Your profile</h2>
-    ${M.me?`<div class="row" style="justify-content:space-between"><span>${esc(M.roster[M.me]||'')}</span><button class="ghost" data-act="switch">Not you?</button></div>`:''}
+    ${M.me?`<div class="prof">${meAv(64)}<div style="display:grid;gap:8px;min-width:0"><div class="nm">${esc(M.roster[M.me]||'')}</div>
+      <div class="photo-btns"><label class="btnlink" style="background:var(--surface);color:var(--ink);border:1px solid var(--line2)">${photo?'Change photo':'Add a photo'}<input type="file" accept="image/*" data-photo></label>${photo?'<button class="ghost" data-act="photoRemove">Remove</button>':''}</div></div></div>
+      ${M.photoErr?`<div class="banner bad">${esc(M.photoErr)}</div>`:''}`:''}
     <div style="display:grid;gap:6px"><span class="eyebrow">Your code</span><div class="codebox"><code>${esc(M.uid||'')}</code><button data-act="copyCode">Copy</button></div>
     <span class="small muted">${M.admin?"You're an exco, so you can open the coach view.":"Excos: send this code to the club owner so they can give you access to the planner."}</span></div>
-    ${M.me?'':'<div class="row"><button class="ghost" data-act="logout">Log out</button></div>'}</section>`;
+    <div class="row">${M.me?'<button class="ghost" data-act="switch">Not you? Unlink this name</button>':'<button class="ghost" data-act="logout">Log out</button>'}</div></section>`;
 }
 function myRsvp(date){return (M.rsvps[date]||{})[M.me]||null}
 function trainingHTML(x){
   const start=toMin(x.start),end=toMin(x.end);
   const rv=M.rsvps[x.date]||{};const yes=Object.keys(rv).filter(id=>rv[id].going&&M.roster[id]);const no=Object.keys(rv).filter(id=>!rv[id].going).length;
   const late=yes.filter(id=>rv[id].status!=='yes').length;
+  const yesSorted=[...yes].sort((a,b)=>firstName(M.roster[a]).localeCompare(firstName(M.roster[b])));
   const mine=myRsvp(x.date),st=mine&&mine.status,going=!!(mine&&mine.going);
   const shut=closed(x.date);
   const f=!shut&&M.form&&M.form.date===x.date?M.form:null;
   const team=x.teamsVisible&&(x.attendees||[]).includes(M.me)?(x.teams||{})[M.me]:null;
   let teamBox='';
   if(x.teamsVisible){
-    if(team==null)teamBox=st==='no'?'':`<div class="myteam"><span class="muted">Teams are out, and you're not on the list for this one. Tell an exco if you're coming.</span></div>`;
+    if(team==null)teamBox=st==='no'?'':`<div class="myteam plain"><span class="muted">Teams are out, and you're not on the list for this one. Tell an exco if you're coming.</span></div>`;
     else{
-      const mates=(x.attendees||[]).filter(id=>(x.teams||{})[id]===team&&id!==M.me&&M.roster[id]).map(id=>M.roster[id]).sort();
+      const mates=(x.attendees||[]).filter(id=>(x.teams||{})[id]===team&&id!==M.me&&M.roster[id]).map(id=>[id,M.roster[id]]).sort((a,b)=>a[1].localeCompare(b[1]));
       const hasGame=(x.blocks||[]).some(b=>b.category==='game');
       const lu=hasGame&&x.lineups&&x.lineups[String(team)];
       let game='';
       if(lu){const k=Object.keys(lu.slots||{}).find(s=>lu.slots[s]===M.me);
         const order=(lu.order&&lu.order.length?lu.order:Object.values(lu.slots||{}));const bat=order.indexOf(M.me);
         game=k?`<div>Game: <b>${esc(POSNAME[k]||k)}</b>${bat>=0?`, batting <b>${ordinal(bat+1)}</b>`:''}</div>`:`<div class="muted">Game: you start on the bench.</div>`}
-      teamBox=`<div class="myteam t${team}"><div class="big-line">You're in Team ${TEAM[team]}</div>${game}
-        <div class="names muted">${mates.map(esc).join(' · ')||'No teammates yet'}</div></div>`;
+      teamBox=`<div class="myteam t${team}"><div class="tname">You're in Team ${TEAM[team]}</div>${game}
+        <div class="going-list">${mates.map(([id,n])=>`<span class="chip">${avatar(n,M.photos[id],24,id)}${esc(firstName(n))}</span>`).join('')||'<span class="muted small">No teammates yet</span>'}</div></div>`;
     }
   }
   let t=start;
@@ -156,16 +189,18 @@ function trainingHTML(x){
       else what+=`<div class="small muted">${b.stations.map(esc).join(', ')}</div>`}
     return `<div class="plan-row"><span class="time">${fmt(s)}–${fmt(t)}</span><span>${what}</span></div>`}).join('');
   return `<section class="card">
-    <div><div class="tr-date">${esc(pretty(x.date))}</div>
-    <div class="tr-meta"><span>${esc(VENUES[x.venue]||x.venue)}</span><span>${fmt(start)}–${fmt(end)}pm</span></div></div>
+    <div class="tr"><div class="dtile" aria-hidden="true"><span class="dw">${esc(dpart(x.date,'weekday'))}</span><span class="dn">${esc(dpart(x.date,'day'))}</span><span class="dm">${esc(dpart(x.date,'month'))}</span></div>
+      <div style="min-width:0"><div class="tr-title">${esc(whenLabel(x.date))}</div>
+      <div class="tr-meta"><span>${ICON.pin}${esc(VENUES[x.venue]||x.venue)}</span><span>${ICON.clock}${fmt(start)}–${fmt(end)}pm</span></div></div>
+      ${st?`<span class="pill ${st==='no'?'bad':st==='yes'?'good':'warn'}">${esc(STATUS[st])}</span>`:'<span class="pill">No reply yet</span>'}</div>
     ${shut?`<div class="mynote">Replies are closed for this training.${st?` You said: <b>${esc(STATUS[st])}</b>.`:''}</div>`:`<div class="rsvp" role="group" aria-label="Are you coming?">
       <button class="y" data-act="rsvp" data-date="${x.date}" data-s="yes" aria-pressed="${going}">${going?'✓ ':''}I'm coming</button>
       <button class="n" data-act="rsvp" data-date="${x.date}" data-s="no" aria-pressed="${st==='no'}">${st==='no'?'✕ ':''}Can't make it</button>
     </div>
     ${going?`<div class="rsvp2" role="group" aria-label="Coming for part of it?"><button data-act="rsvp" data-date="${x.date}" data-s="late" aria-pressed="${st==='late'}">Coming late</button><button data-act="rsvp" data-date="${x.date}" data-s="early" aria-pressed="${st==='early'}">Leaving early</button></div>`:''}
     ${f?replyFormHTML(x,f):mine&&(mine.reason||mine.time)&&st!=='yes'?`<div class="mynote">${esc(STATUS[st])}${mine.time?`, ${st==='late'?'arriving':'leaving'} ${fmt(toMin(mine.time))}`:''}${mine.reason?` · ${esc(mine.reason)}`:''} <button class="ghost" data-act="rsvp" data-date="${x.date}" data-s="${st}" style="padding:2px 8px;font-size:13px">Change</button></div>`:''}`}
-    <details${M.open[x.date]?' open':''} data-open="${x.date}"><summary>${yes.length} coming${late?` (${late} late or leaving early)`:''} · ${no} can't</summary>
-      <div class="names" style="margin-top:6px">${yes.map(id=>esc(firstName(M.roster[id]))+(rv[id].status==='late'?' (late)':rv[id].status==='early'?' (leaving early)':'')).sort().join(' · ')||'<span class="muted">Nobody yet</span>'}</div></details>
+    <details${M.open[x.date]?' open':''} data-open="${x.date}"><summary><span class="going"><span class="av-stack">${yesSorted.slice(0,5).map(id=>avatar(M.roster[id],M.photos[id],28,id)).join('')}${yes.length>5?`<span class="av-more">+${yes.length-5}</span>`:''}</span><span>${yes.length} coming${late?` (${late} late or early)`:''} · ${no} can't</span></span></summary>
+      <div class="going-list">${yesSorted.map(id=>`<span class="chip">${avatar(M.roster[id],M.photos[id],24,id)}${esc(firstName(M.roster[id]))}${rv[id].status==='late'?' <span class="muted">· late</span>':rv[id].status==='early'?' <span class="muted">· leaves early</span>':''}</span>`).join('')||'<span class="muted small">Nobody yet</span>'}</div></details>
     ${teamBox}
     ${rows?`<details><summary>Training plan</summary><div>${rows}</div></details>`:''}
   </section>`;
@@ -188,7 +223,7 @@ const closed=date=>Date.now()>startsAt(date)+3*3600e3;
 function homeHTML(){
   const today=sgToday();
   const up=M.sessions.filter(x=>x.date>=today).sort((a,b)=>a.date.localeCompare(b.date));
-  const bar=`<div class="me-bar"><span>Hi${M.me?` <b>${esc(firstName(M.roster[M.me]||''))}</b>`:''}</span><div class="row">${M.admin?'<a class="btnlink" href="coach.html">Coach view</a>':''}<button class="ghost" data-act="profile" aria-expanded="${M.showProfile}">Profile</button></div></div>${M.showProfile?profileHTML():''}`;
+  const bar=`<div class="hello">${M.me?`<button class="avbtn" data-act="profile" aria-label="Your profile">${meAv(44)}</button>`:''}<div><div class="hi">Hi${M.me?` ${esc(firstName(M.roster[M.me]||''))}`:''}</div><div class="small muted">${up.length?`${up.length} training${up.length>1?'s':''} coming up`:'No trainings posted yet'}</div></div><div class="row">${M.admin?'<a class="btnlink" href="coach.html">Coach view</a>':''}<button class="ghost" data-act="profile" aria-expanded="${M.showProfile}">${M.showProfile?'Close':'Profile'}</button></div></div>${M.showProfile?profileHTML():''}`;
   if(!M.me)return bar+`<section class="card"><h2>Link your name</h2><p class="muted" style="margin:0">To reply to trainings, find your name and an exco will confirm it. You only do this once.</p><div class="row"><button class="primary" data-act="tolink">Find my name</button></div></section>`;
   return `${bar}
     ${up.length?up.map(trainingHTML).join(''):`<section class="card"><h2>No trainings posted</h2><p class="muted" style="margin:0">When the excos post the next training, it'll show here and you can reply.</p></section>`}`;
@@ -219,11 +254,17 @@ const A={
     return saveReply(date,status,'','');
   },
   rsCancel(){M.form=null;M.err=''},
+  async photoRemove(){M.photoErr='';try{await db.doc('photos/'+M.me).set({src:'',by:M.uid,at:new Date().toISOString()});M.photos[M.me]='';toast('Photo removed')}catch(e){M.photoErr="Couldn't remove it. Try again."}render()},
   rsSave(){const f=M.form;if(!f)return;const reason=String(f.reason||'').trim();
     if(!reason){M.err=f.status==='no'?'Let the excos know why you can no longer make it.':'Add a reason so the excos can plan around it.';return}
     return saveReply(f.date,f.status,f.time||'',reason)},
 };
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el||el.disabled)return;const r=A[el.dataset.act](el.dataset);if(!(r instanceof Promise))render()});
+document.addEventListener('change',async e=>{if(!e.target.matches('[data-photo]'))return;const file=e.target.files&&e.target.files[0];if(!file)return;
+  M.photoErr='';
+  try{const src=await shrinkPhoto(file);await db.doc('photos/'+M.me).set({src,by:M.uid,at:new Date().toISOString()});M.photos[M.me]=src;toast('Photo saved')}
+  catch(err){M.photoErr=err&&err.message==='not_image'?"That file isn't a photo. Pick a JPG or PNG.":"Couldn't save the photo. Try a different one."}
+  render()});
 document.addEventListener('input',e=>{const k=e.target.dataset.input;if(!k)return;const [a,b]=k.split('.');if(b){if(M[a])M[a][b]=e.target.value}else M[k]=e.target.value;if(k==='q')render()});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='q'){const first=document.querySelector('.who button');if(first)first.click()}});
 document.addEventListener('toggle',e=>{const d=e.target.dataset&&e.target.dataset.open;if(d)M.open[d]=e.target.open},true);
@@ -263,12 +304,19 @@ function watchLink(){
   db.doc('linkRequests/'+M.uid).onSnapshot(s=>{M.req=s.exists?s.data():null;if(M.status==='login')render()},()=>{});
   db.doc('claims/'+M.uid).onSnapshot(s=>{if(s.exists&&s.data().memberId&&!M.me){M.me=s.data().memberId;M.req=null;M.status='home';startData();toast("You're linked. Welcome!");render()}},()=>{});
 }
+// The first time a member is linked, use their Telegram profile photo (they can change or remove it later).
+async function useTelegramPhoto(hasDoc){
+  if(hasDoc||!M.me)return;
+  try{const p=await telegramProfile();if(safePhoto(p.photo))await db.doc('photos/'+M.me).set({src:p.photo,by:M.uid,at:new Date().toISOString()})}catch(e){}
+}
 let dataStarted=false;
 function startData(){
   if(dataStarted)return;dataStarted=true;
   const today=sgToday();
   const fail=()=>{M.status='error';render()};
   db.collection('sessions').where('published','==',true).onSnapshot(s=>{M.sessions=s.docs.map(x=>({...x.data(),date:x.id}));render()},fail);
+  db.collection('photos').onSnapshot(s=>{M.photos=Object.fromEntries(s.docs.map(x=>[x.id,x.data().src||'']));
+    if(!M.photosLoaded){M.photosLoaded=true;useTelegramPhoto(s.docs.some(x=>x.id===M.me))}render()},()=>{});
   db.collection('rsvps').where('date','>=',today).onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]={...v,status:v.status||(v.going?'yes':'no')}});M.rsvps=o;render()},fail);
 }
 

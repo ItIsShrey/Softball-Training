@@ -26,7 +26,7 @@ export async function signInTelegram(tgUser) {
   }
   const { token, name } = await res.json();
   await signInWithCustomToken(auth, token);
-  try { localStorage.setItem('tgProfile', JSON.stringify({ name: name || '', username: tgUser.username || '' })); } catch (e) {}
+  try { localStorage.setItem('tgProfile', JSON.stringify({ name: name || '', username: tgUser.username || '', photo: tgUser.photo_url || '' })); } catch (e) {}
   return auth.currentUser;
 }
 // Telegram name and @username of the person logged in, for link requests. The username comes from the signed token.
@@ -34,7 +34,7 @@ export async function telegramProfile() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem('tgProfile') || '{}'); } catch (e) {}
   const claims = auth.currentUser ? (await auth.currentUser.getIdTokenResult()).claims : {};
-  return { name: saved.name || '', username: claims.tgUsername || '' };
+  return { name: saved.name || '', username: claims.tgUsername || '', photo: saved.photo || '' };
 }
 // Tells the excos' Telegram chat about a last-minute reply change. The Worker reads the reply itself and
 // only posts real changes made in the 6 hours before a training, so this can't be used to send anything else.

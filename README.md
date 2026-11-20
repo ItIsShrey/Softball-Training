@@ -101,6 +101,7 @@ The tests use a fake project, so they never touch the real database or its daily
 - A new login can read the list of names, to find their own. Trainings and replies need a login linked to a name.
 - Levels, genders and drills are visible to excos only. Only the owner adds or removes excos.
 - Members can only reply for themselves. Coming late, leaving early, or changing a yes to a no needs a reason.
+- Profile photos are small images kept in the database (no Firebase Storage, so no paid plan). Members change only their own; a member's Telegram photo is used until they pick one.
 - Don't put anything sensitive in a training plan.
 
 ## Files
