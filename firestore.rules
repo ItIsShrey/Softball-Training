@@ -137,6 +137,28 @@ service cloud.firestore {
       allow delete: if isAdmin() || (isLinked() && claimedMember() == memberId);
     }
 
+    // Tournaments, friendlies and socials. Excos create them; linked members see the published ones.
+    match /events/{id} {
+      allow read: if isAdmin() || (isLinked() && resource.data.published == true);
+      allow write: if isAdmin();
+    }
+    // A member's going / can't for an event, saved as <eventId>_<memberId>. Open until the event ends.
+    match /eventReplies/{rid} {
+      allow read: if isAdmin() || isLinked();
+      allow delete: if isAdmin();
+      allow create, update: if isAdmin() || (
+        tgUser()
+        && request.resource.data.keys().hasOnly(['eventId', 'memberId', 'going', 'uid', 'at'])
+        && request.resource.data.going is bool
+        && request.resource.data.at is string && request.resource.data.at.size() <= 40
+        && request.resource.data.uid == request.auth.uid
+        && rid == request.resource.data.eventId + '_' + request.resource.data.memberId
+        && claimedMember() == request.resource.data.memberId
+        && get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.published == true
+        && request.time < get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.endsAt
+      );
+    }
+
     // The Worker marks each exco alert it has sent here, so one change is never posted twice. No page access.
     match /notified/{id} { allow read, write: if false; }
   }

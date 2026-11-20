@@ -268,6 +268,17 @@ details[open] summary{margin-bottom:8px}
 .k.tday{border:1px dashed color-mix(in srgb,var(--field) 55%,var(--line2))}
 .cal-sum{display:flex;gap:4px 14px;flex-wrap:wrap;color:var(--muted);font-size:14px}
 
+/* ---------- Events (tournaments, friendlies, socials) ---------- */
+:root{--ev-tournament:#b8860b;--ev-friendly:#2a7de1;--ev-social:#c2417a}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ev-tournament:#e0b84f;--ev-friendly:#6aa8ff;--ev-social:#f07aac}}
+:root[data-theme="dark"]{--ev-tournament:#e0b84f;--ev-friendly:#6aa8ff;--ev-social:#f07aac}
+.ev-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:2px 8px;color:var(--ev,var(--muted));background:color-mix(in srgb,var(--ev,var(--muted)) 14%,transparent)}
+.ev-tournament{--ev:var(--ev-tournament)} .ev-friendly{--ev:var(--ev-friendly)} .ev-social{--ev:var(--ev-social)}
+.ev-card{border-top:4px solid var(--ev,var(--line))}
+.cd-ev{position:absolute;top:6px;right:6px;display:flex;gap:2px}
+.cd-ev i{width:7px;height:7px;border-radius:50%;background:var(--ev);box-shadow:0 0 0 1.5px var(--surface)}
+.k.ev-tournament,.k.ev-friendly,.k.ev-social{border-radius:50%;background:var(--ev);border-color:var(--ev)}
+
 /* ---------- Toast ---------- */
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:14px;font-weight:600;z-index:20;max-width:calc(100% - 32px);box-shadow:var(--shadow-lg)}
 
@@ -297,3 +308,4 @@ details[open] summary{margin-bottom:8px}
   body.coach .actions{bottom:calc(74px + env(safe-area-inset-bottom,0px))}
   body.coach .toast{bottom:calc(84px + env(safe-area-inset-bottom,0px))}
 }
+.ev-notes{font-size:14px;line-height:1.5;color:var(--ink);background:var(--tint);border-radius:10px;padding:10px 12px;white-space:normal;overflow-wrap:anywhere}

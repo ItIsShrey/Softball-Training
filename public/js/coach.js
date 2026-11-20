@@ -22,6 +22,8 @@ const venueKind=id=>(VENUES.find(v=>v.id===id)||VENUES[0]).kind;
 const venueLabel=id=>(VENUES.find(v=>v.id===id)||{label:id}).label;
 const toMin=t=>{const[h,m]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0)};
 const fmt=m=>{const h=Math.floor(m/60),mm=((m%60)+60)%60;return (((h+11)%12)+1)+':'+String(mm).padStart(2,'0')};
+// "9:00am–12:00pm", or "7:00–9:30pm" when both ends share am or pm.
+const span=(a,b)=>{const ap=t=>toMin(t)%1440<720?'am':'pm',x=ap(a),y=ap(b);return fmt(toMin(a))+(x===y?'':x)+'–'+fmt(toMin(b))+y};
 const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const dow=s=>new Date(s+'T12:00:00Z').getUTCDay();
 const pretty=s=>new Date(s+'T12:00:00Z').toLocaleDateString('en-SG',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'});
@@ -37,7 +39,7 @@ const byOrder=(a,b)=>(a.order??0)-(b.order??0)||String(a.name).localeCompare(b.n
 const av=(m,size=28)=>m?avatar(m.name,S.photos[m.id],size,m.id):'';
 function nextTraining(){for(let i=0;i<7;i++){const d=sgDate(Date.now()+i*864e5);if(dow(d)===3||dow(d)===5)return d}return sgToday()}
 
-const S={db:null,user:null,photos:{},links:{},roster:{},rsvps:{},rinfo:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
+const S={db:null,user:null,events:{},evReplies:{},ev:null,photos:{},links:{},roster:{},rsvps:{},rinfo:{},offline:false,readOnly:false,status:'loading',ready:{m:0,d:0,s:0},luTeam:0,luView:'field',sel:null,drag:null,suppressClick:false,
   members:[],drills:[],sessions:{},view:'plan',draft:null,dirty:false,blocksEdited:false,
   mf:null,df:null,paste:'',pasteMsg:'',confirm:null,admins:[],reqs:[],exCode:'',exName:'',planDate:null,calMonth:null,calSel:null};
 S.calSel=nextTraining();S.calMonth=S.calSel.slice(0,7);
@@ -223,6 +225,37 @@ function planHTML(){
 }
 
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+// ---------- Events: tournaments, friendlies and socials ----------
+// Brings the event form into view once it's drawn (on phones it sits under the calendar).
+const toForm=()=>setTimeout(()=>{const el=document.getElementById('ev-title');if(el)el.closest('section').scrollIntoView({block:'start',behavior:'smooth'})},0);
+const EVTYPES=[['tournament','Tournament'],['friendly','Friendly'],['social','Social']];
+const evLabel=t=>(EVTYPES.find(x=>x[0]===t)||[,'Event'])[1];
+const eventsOn=date=>Object.values(S.events).filter(e=>e.date===date).sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+function newEvent(date){return {id:null,type:'friendly',title:'',date:date||sgToday(),start:'09:00',end:'12:00',venue:'',cost:'',notes:'',published:false}}
+function eventPanelHTML(sel){
+  const evs=eventsOn(sel);
+  return `${evs.map(e=>{const rv=S.evReplies[e.id]||{};const yes=Object.values(rv).filter(v=>v===true).length,no=Object.values(rv).filter(v=>v===false).length;
+    return `<section class="card ev-card ev-${esc(e.type)}"><div class="card-h"><div><span class="ev-tag ev-${esc(e.type)}">${esc(evLabel(e.type))}</span><h2 style="margin-top:6px">${esc(e.title||evLabel(e.type))}</h2></div>${e.published?'<span class="pill good">Members can see it</span>':'<span class="pill warn">Only excos</span>'}</div>
+      <div class="cal-sum"><span>${esc(pretty(e.date))}</span><span>${span(e.start,e.end)}</span>${e.venue?`<span>${esc(e.venue)}</span>`:''}${e.published?`<span>${yes} going · ${no} can't</span>`:''}</div>
+      <div class="row"><button data-act="evEdit" data-id="${esc(e.id)}">Edit event</button></div></section>`}).join('')}`;
+}
+function eventFormHTML(){
+  const f=S.ev,rv=f.id?(S.evReplies[f.id]||{}):{};
+  const going=S.members.filter(m=>rv[m.id]===true).sort((a,b)=>a.name.localeCompare(b.name)),cant=S.members.filter(m=>rv[m.id]===false).sort((a,b)=>a.name.localeCompare(b.name));
+  const none=S.members.filter(m=>m.active!==false&&!(m.id in rv)).length;
+  return `<section class="card"><div class="card-h"><h2>${f.id?'Edit event':'New event'}</h2><button class="ghost" data-act="evClose">Close</button></div>
+    <div style="display:grid;gap:6px"><span class="eyebrow">Type</span><div class="seg" role="group" aria-label="Event type">${EVTYPES.map(([k,l])=>`<button data-act="evType" data-t="${k}" aria-pressed="${f.type===k}">${l}</button>`).join('')}</div></div>
+    <label class="f">Title<input id="ev-title" data-input="ev.title" value="${esc(f.title)}" maxlength="80" placeholder="${f.type==='tournament'?'e.g. IVP Softball':f.type==='social'?'e.g. Team dinner':'e.g. Friendly vs NUS'}" autocomplete="off"></label>
+    <div class="g2"><label class="f">Date<input type="date" id="ev-date" data-input="ev.date" value="${esc(f.date)}"></label><label class="f">Venue<input id="ev-venue" data-input="ev.venue" value="${esc(f.venue)}" maxlength="80" placeholder="Where" autocomplete="off"></label></div>
+    <div class="g2"><label class="f">Start<input type="time" id="ev-start" data-input="ev.start" value="${esc(f.start)}" step="300"></label><label class="f">End<input type="time" id="ev-end" data-input="ev.end" value="${esc(f.end)}" step="300"></label></div>
+    <label class="f">Cost (optional)<input id="ev-cost" data-input="ev.cost" value="${esc(f.cost)}" maxlength="40" placeholder="e.g. $15, pay Aiden" autocomplete="off"></label>
+    <label class="f">Details (optional)<textarea id="ev-notes" data-input="ev.notes" maxlength="1000" placeholder="What to bring, meeting point, dress code">${esc(f.notes)}</textarea></label>
+    <label class="check"><input type="checkbox" data-evpub${f.published?' checked':''}><span>Members can see this event and reply</span></label>
+    ${f.id&&f.published?`<div style="display:grid;gap:6px"><span class="eyebrow">Replies</span><div class="row small"><span class="pill good">${going.length} going</span><span class="pill bad">${cant.length} can't</span><span class="muted">${none} no reply</span></div>
+      ${going.length?`<div class="chips">${going.map(m=>`<span class="chip">${av(m,22)}${esc(m.name)}</span>`).join('')}</div>`:''}</div>`:''}
+    <div class="row"><button class="primary" data-act="evSave"${S.readOnly?' disabled':''}>${f.id?'Save changes':'Add event'}</button>${f.id?`<button class="ghost danger" data-act="evDel" style="margin-left:auto">${S.confirm==='ev'+f.id?'Tap again to delete':'Delete event'}</button>`:''}</div>
+  </section>`;
+}
 function calHTML(){
   const [y,mo]=S.calMonth.split('-').map(Number);
   const first=new Date(y,mo-1,1),lead=(first.getDay()+6)%7,days=new Date(y,mo,0).getDate();
@@ -230,10 +263,11 @@ function calHTML(){
   const cells=[];for(let i=0;i<lead;i++)cells.push('<span class="cd blank"></span>');
   for(let n=1;n<=days;n++){const date=`${y}-${String(mo).padStart(2,'0')}-${String(n).padStart(2,'0')}`;const x=S.sessions[date];const wd=dow(date);
     const cls=['cd',x?'has':'',x&&x.published?'pub':'',(wd===3||wd===5)?'tday':'',date===today?'today':'',S.draft&&S.dirty&&S.draft.date===date?'unsaved':''].filter(Boolean).join(' ');
-    cells.push(`<button class="${cls}" data-act="calPick" data-date="${date}" aria-pressed="${S.calSel===date}" aria-label="${esc(pretty(date))}${x?', has a plan':''}"><span class="cd-n">${n}</span>${x?`<span class="cd-v">${esc(x.venue||'')}</span>`:''}</button>`)}
+    const evs=eventsOn(date);
+    cells.push(`<button class="${cls}" data-act="calPick" data-date="${date}" aria-pressed="${S.calSel===date}" aria-label="${esc(pretty(date))}${x?', has a plan':''}${evs.length?', '+evs.map(e=>evLabel(e.type)).join(', '):''}"><span class="cd-n">${n}</span>${evs.length?`<span class="cd-ev">${evs.slice(0,3).map(e=>`<i class="ev-${esc(e.type)}"></i>`).join('')}</span>`:''}${x?`<span class="cd-v">${esc(x.venue||'')}</span>`:''}</button>`)}
   const grid=`<section class="card cal"><div class="card-h"><h2>${MONTHS[mo-1]} ${y}</h2><div class="row" style="gap:4px"><button class="ghost" data-act="calMove" data-n="-1" aria-label="Previous month">‹</button><button class="ghost" data-act="calToday">Today</button><button class="ghost" data-act="calMove" data-n="1" aria-label="Next month">›</button></div></div>
     <div class="cal-g">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<span class="cal-h">${d}</span>`).join('')}${cells.join('')}</div>
-    <div class="cal-key small muted"><span><i class="k has"></i>Plan saved</span><span><i class="k pub"></i>Members can see it</span><span><i class="k tday"></i>Usual training day</span></div></section>`;
+    <div class="cal-key small muted"><span><i class="k has"></i>Plan saved</span><span><i class="k pub"></i>Members can see it</span><span><i class="k tday"></i>Usual training day</span><span><i class="k ev-tournament"></i>Tournament</span><span><i class="k ev-friendly"></i>Friendly</span><span><i class="k ev-social"></i>Social</span></div></section>`;
   const sel=S.calSel,x=sel&&S.sessions[sel];
   let panel;
   if(!sel)panel='';
@@ -242,9 +276,13 @@ function calHTML(){
       <div class="cal-sum"><span>${esc(venueLabel(x.venue))}</span><span>${fmt(toMin(x.start))}–${fmt(toMin(x.end))}</span><span>${(x.attendees||[]).length} ticked as coming</span>${x.published?`<span>${yes} coming${late?` (${late} late or leaving early)`:''} · ${no} can't</span>`:''}</div>
       <div class="row"><button class="primary" data-act="openPlan" data-date="${sel}">View plan</button></div></section>`}
   else panel=`<section class="card"><h2>${esc(pretty(sel))}</h2><p class="muted" style="margin:0">No plan for this day yet.${(dow(sel)===3||dow(sel)===5)?'':' It isn\'t a usual training day.'}</p><div class="row"><button class="primary" data-act="openPlan" data-date="${sel}">Make a plan</button></div></section>`;
+  if(sel)panel+=eventPanelHTML(sel)+`<div class="row"><button data-act="evNew" data-date="${sel}">+ Add a tournament, friendly or social</button></div>`;
+  if(S.ev)panel=eventFormHTML();
   const today2=sgToday();
-  const up=Object.values(S.sessions).filter(v=>v.date>=today2).sort((a,b)=>a.date.localeCompare(b.date)).slice(0,6);
-  const upcoming=`<section class="card"><h2>Coming up</h2>${up.length?`<div class="saved">${up.map(v=>`<button data-act="calPick" data-date="${v.date}" aria-current="${v.date===sel}"><span>${esc(pretty(v.date))} · ${esc(venueLabel(v.venue))}</span><span class="muted small">${v.published?'posted':'draft'}</span></button>`).join('')}</div>`:'<p class="muted small" style="margin:0">No upcoming plans. Pick a day on the calendar to make one.</p>'}</section>`;
+  const up=[...Object.values(S.sessions).filter(v=>v.date>=today2).map(v=>({date:v.date,t:v.start||'',label:venueLabel(v.venue),pub:v.published})),
+    ...Object.values(S.events).filter(e=>e.date>=today2).map(e=>({date:e.date,t:e.start||'',label:e.title||evLabel(e.type),pub:e.published,type:e.type}))]
+    .sort((a,b)=>a.date.localeCompare(b.date)||a.t.localeCompare(b.t)).slice(0,8);
+  const upcoming=`<section class="card"><h2>Coming up</h2>${up.length?`<div class="saved">${up.map(v=>`<button data-act="calPick" data-date="${v.date}" aria-current="${v.date===sel}"><span>${v.type?`<span class="ev-tag ev-${esc(v.type)}">${esc(evLabel(v.type))}</span> `:''}${esc(pretty(v.date))} · ${esc(v.label)}</span><span class="muted small">${v.pub?'posted':'draft'}</span></button>`).join('')}</div>`:'<p class="muted small" style="margin:0">Nothing coming up. Pick a day on the calendar to plan a training or add an event.</p>'}</section>`;
   const unsaved=S.draft&&S.dirty?`<div class="banner">You have unsaved changes on ${esc(pretty(S.draft.date))}. <button class="ghost" data-act="openPlan" data-date="${S.draft.date}">Go back to it</button></div>`:'';
   const waiting=S.reqs.length?`<div class="banner">${S.reqs.length} ${S.reqs.length===1?'person is':'people are'} waiting to be linked to their name. <a href="#members">Review in Members</a></div>`:'';
   return `${waiting}${unsaved}<div class="cols"><div class="stack">${grid}</div><div class="stack">${lastMinuteHTML()}${panel}${upcoming}</div></div>`;
@@ -547,7 +585,19 @@ const A={
   stdel({i,j}){S.draft.blocks[+i].stations.splice(+j,1);S.blocksEdited=true;markDirty()},
   rebuild(){if(!armConfirm('rebuild'))return;S.draft.blocks=autoBlocks(S.draft);S.blocksEdited=false;markDirty()},
   open({date}){location.hash='plan/'+date},
-  calPick({date}){S.calSel=date;S.calMonth=date.slice(0,7)},
+  calPick({date}){S.calSel=date;S.calMonth=date.slice(0,7);S.ev=null},
+  evNew({date}){S.ev=newEvent(date);toForm()},
+  evEdit({id}){const e=S.events[id];if(e)S.ev={...newEvent(e.date),...e,id};toForm()},
+  evClose(){S.ev=null},
+  evType({t}){S.ev.type=t},
+  async evSave(){const f=S.ev;if(!f)return;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(f.date)||!f.start||!f.end){toast('Add a date, start and end time.');return render()}
+    const ref=f.id?S.db.doc('events/'+f.id):S.db.collection('events').doc();
+    // endsAt lets the database close replies once the event is over (times are Singapore time).
+    const d={type:f.type,title:String(f.title||'').trim().slice(0,80),date:f.date,start:f.start,end:f.end,venue:String(f.venue||'').trim().slice(0,80),cost:String(f.cost||'').trim().slice(0,40),notes:String(f.notes||'').trim().slice(0,1000),
+      published:!!f.published,endsAt:new Date(Date.parse(f.date+'T'+f.end+':00+08:00')+(f.end<=f.start?864e5:0)),updatedAt:new Date().toISOString(),updatedBy:S.user.uid};
+    if(await write(()=>ref.set(d),f.id?'Event saved':'Event added')){S.ev=null;S.calSel=f.date;S.calMonth=f.date.slice(0,7)}render()},
+  async evDel(){const f=S.ev;if(!f||!f.id||!armConfirm('ev'+f.id))return;if(await write(()=>S.db.doc('events/'+f.id).delete(),'Event deleted'))S.ev=null;render()},
   calMove({n}){const [y,m]=S.calMonth.split('-').map(Number);const d=new Date(y,m-1+(+n),1);S.calMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`},
   calToday(){const t=sgToday();S.calMonth=t.slice(0,7);S.calSel=t},
   openPlan({date}){location.hash='plan/'+date},
@@ -622,6 +672,7 @@ document.addEventListener('input',e=>{
 });
 document.addEventListener('change',e=>{
   const el=e.target,d=S.draft;
+  if('evpub' in el.dataset){if(S.ev)S.ev.published=el.checked;return}
   if(el.dataset.fb){d[el.dataset.fb]=el.checked;if(el.dataset.fb==='published'&&!el.checked)d.teamsVisible=false;markDirty();render();return}
   if(el.id==='import-file'&&el.files[0]){importBackup(el.files[0]);return}
   if(el.dataset.exPick){const tg=el.value;if(tg){const mid=Object.keys(S.links).find(k=>S.links[k]===tg);const m=S.members.find(m=>m.id===mid);S.exCode=tg;S.exName=m?m.name:''}render();return}
@@ -683,6 +734,8 @@ function start(){
   db.collection('claims').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();if(x.id.startsWith('tg:'))o[v.memberId]=x.id});S.links=o;if(S.status==='ok')render()},()=>{});
   db.collection('linkRequests').onSnapshot(s=>{S.reqs=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>String(a.at).localeCompare(String(b.at)));if(S.status==='ok')render()},()=>{});
   db.collection('admins').onSnapshot(s=>{S.admins=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>(adminName(a)||a.id).localeCompare(adminName(b)||b.id));if(S.status==='ok')render()},()=>{});
+  db.collection('events').onSnapshot(s=>{S.events=Object.fromEntries(s.docs.map(x=>[x.id,{...x.data(),id:x.id}]));if(S.status==='ok')render()},()=>{});
+  db.collection('eventReplies').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.eventId]=o[v.eventId]||{})[v.memberId]=v.going});S.evReplies=o;if(S.status==='ok')render()},()=>{});
   db.collection('photos').onSnapshot(s=>{S.photos=Object.fromEntries(s.docs.map(x=>[x.id,x.data().src||'']));if(S.status==='ok')render()},()=>{});
   // Replies and reasons from the last 90 days only, so opening the planner doesn't download every reply ever made.
   const since=sgDate(Date.now()-90*864e5);

@@ -204,3 +204,31 @@ test('members set only their own photo, and only a small image or their Telegram
   await assertFails(getDoc(doc(as(NEWBIE), 'photos', 'm1')));
   await assertSucceeds(setDoc(doc(as(EXCO), 'photos', 'm2'), { src: img, by: EXCO, at: 'now' }));
 });
+
+test('members see published events and reply until the event ends', async () => {
+  const later = new Date(Date.now() + 7 * 864e5), past = new Date(Date.now() - 864e5);
+  await env.withSecurityRulesDisabled(async ctx => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'events', 'e1'), { type: 'friendly', title: 'vs NUS', date: '2030-01-01', published: true, endsAt: later });
+    await setDoc(doc(db, 'events', 'e2'), { type: 'social', title: 'Draft', date: '2030-01-02', published: false, endsAt: later });
+    await setDoc(doc(db, 'events', 'e3'), { type: 'tournament', title: 'Done', date: '2020-01-01', published: true, endsAt: past });
+  });
+  const db = as(MEMBER);
+  const ev = (o = {}) => ({ eventId: 'e1', memberId: 'm1', going: true, uid: MEMBER, at: 'now', ...o });
+  await assertSucceeds(getDoc(doc(db, 'events', 'e1')));
+  await assertFails(getDoc(doc(db, 'events', 'e2')));
+  await assertSucceeds(getDocs(query(collection(db, 'events'), where('published', '==', true))));
+  await assertFails(getDoc(doc(as(NEWBIE), 'events', 'e1')));
+  await assertFails(setDoc(doc(db, 'events', 'e1'), { title: 'hacked' }));
+  await assertSucceeds(setDoc(doc(as(EXCO), 'events', 'e4'), { type: 'social', title: 'BBQ', published: false }));
+
+  await assertSucceeds(setDoc(doc(db, 'eventReplies', 'e1_m1'), ev()));
+  await assertSucceeds(setDoc(doc(db, 'eventReplies', 'e1_m1'), ev({ going: false })));
+  await assertFails(setDoc(doc(db, 'eventReplies', 'e1_m2'), ev({ memberId: 'm2' })));
+  await assertFails(setDoc(doc(db, 'eventReplies', 'e2_m1'), ev({ eventId: 'e2' })));
+  await assertFails(setDoc(doc(db, 'eventReplies', 'e3_m1'), ev({ eventId: 'e3' })));
+  await assertFails(setDoc(doc(db, 'eventReplies', 'e1_m1'), ev({ going: 'yes' })));
+  await assertFails(setDoc(doc(db, 'eventReplies', 'e1_m1'), ev({ extra: 1 })));
+  await assertFails(deleteDoc(doc(db, 'eventReplies', 'e1_m1')));
+  await assertSucceeds(getDocs(collection(db, 'eventReplies')));
+});

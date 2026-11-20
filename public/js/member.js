@@ -9,6 +9,8 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const toMin=t=>{const[h,m]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0)};
 const fmt=m=>{const h=Math.floor(m/60),mm=((m%60)+60)%60;return (((h+11)%12)+1)+':'+String(mm).padStart(2,'0')};
+// "9:00am–12:00pm", or "7:00–9:30pm" when both ends share am or pm.
+const span=(a,b)=>{const ap=t=>toMin(t)%1440<720?'am':'pm',x=ap(a),y=ap(b);return fmt(toMin(a))+(x===y?'':x)+'–'+fmt(toMin(b))+y};
 const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const pretty=s=>new Date(s+'T12:00:00Z').toLocaleDateString('en-SG',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'});
 // Trainings are in Singapore, so "today" and start times are Singapore time whatever the phone is set to.
@@ -21,7 +23,7 @@ const firstName=n=>{n=String(n||'');if(n.includes(','))return n.split(',')[1].tr
 const norm=s=>String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim();
 
 const NEXT=new URLSearchParams(location.search).get('next');
-const M={notes:{},photos:{},photosLoaded:false,admin:false,showProfile:false,req:null,uid:null,me:null,roster:{},sessions:[],rsvps:{},q:'',pick:null,err:'',busy:false,open:{},form:null};
+const M={notes:{},photos:{},photosLoaded:false,admin:false,showProfile:false,req:null,uid:null,me:null,roster:{},sessions:[],rsvps:{},events:[],evReplies:{},q:'',pick:null,err:'',busy:false,open:{},form:null};
 function copyText(txt){const done=()=>toast('Code copied');
   const fallback=()=>{const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand('copy')}catch(e){}ta.remove();ok?done():toast("Couldn't copy. Press and hold the code to copy it.")};
   try{navigator.clipboard.writeText(txt).then(done,fallback)}catch(e){fallback()}}
@@ -74,7 +76,8 @@ function loginHTML(){
 
 const meAv=size=>avatar(M.roster[M.me]||'?',M.photos[M.me],size,M.me||'');
 const ICON={pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-5.6 7-11.5a7 7 0 1 0-14 0C5 15.4 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
-  clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'};
+  clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  cost:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>'};
 function profileHTML(){
   const photo=M.me&&safePhoto(M.photos[M.me]);
   return `<section class="card"><h2>Your profile</h2>
@@ -149,13 +152,48 @@ function startsAt(date){const x=M.sessions.find(s=>s.date===date);return Date.pa
 // Replies close 3 hours after the start (the database enforces this too).
 const closed=date=>Date.now()>startsAt(date)+3*3600e3;
 
+// Tournaments, friendlies and socials. Replies stay open until the event ends (the database enforces this too).
+const EVLABEL={tournament:'Tournament',friendly:'Friendly',social:'Social'};
+const evEnds=e=>Date.parse(e.date+'T'+(e.end||'23:59')+':00+08:00')+(e.end&&e.start&&e.end<=e.start?864e5:0);
+const evOver=e=>Date.now()>=evEnds(e);
+function eventHTML(e){
+  const rv=M.evReplies[e.id]||{};const yes=Object.keys(rv).filter(id=>rv[id]===true&&M.roster[id]).sort((a,b)=>firstName(M.roster[a]).localeCompare(firstName(M.roster[b])));
+  const no=Object.keys(rv).filter(id=>rv[id]===false).length;
+  const mine=rv[M.me],shut=evOver(e),label=EVLABEL[e.type]||'Event';
+  const notes=e.notes?esc(e.notes).replace(/\n/g,'<br>'):'';
+  return `<section class="card ev-card ev-${esc(e.type)}">
+    <div class="tr"><div class="dtile" aria-hidden="true"><span class="dw">${esc(dpart(e.date,'weekday'))}</span><span class="dn">${esc(dpart(e.date,'day'))}</span><span class="dm">${esc(dpart(e.date,'month'))}</span></div>
+      <div style="min-width:0"><span class="ev-tag ev-${esc(e.type)}">${esc(label)}</span><div class="tr-title" style="margin-top:4px">${esc(e.title||label)}</div>
+      <div class="tr-meta"><span>${ICON.clock}${esc(whenLabel(e.date))}, ${span(e.start,e.end)}</span>${e.venue?`<span>${ICON.pin}${esc(e.venue)}</span>`:''}${e.cost?`<span>${ICON.cost}${esc(e.cost)}</span>`:''}</div></div>
+      ${mine===true?'<span class="pill good">Going</span>':mine===false?`<span class="pill bad">Can't go</span>`:'<span class="pill">No reply yet</span>'}</div>
+    ${notes?`<div class="ev-notes">${notes}</div>`:''}
+    ${shut?`<div class="mynote">Replies are closed for this event.</div>`:`<div class="rsvp" role="group" aria-label="Are you going?">
+      <button class="y" data-act="evReply" data-id="${esc(e.id)}" data-g="1" aria-pressed="${mine===true}"${M.busy?' disabled':''}>${mine===true?'✓ ':''}I'm going</button>
+      <button class="n" data-act="evReply" data-id="${esc(e.id)}" data-g="0" aria-pressed="${mine===false}"${M.busy?' disabled':''}>${mine===false?'✕ ':''}Can't make it</button></div>`}
+    <details${M.open['ev'+e.id]?' open':''} data-open="ev${esc(e.id)}"><summary><span class="going"><span class="av-stack">${yes.slice(0,5).map(id=>avatar(M.roster[id],M.photos[id],28,id)).join('')}${yes.length>5?`<span class="av-more">+${yes.length-5}</span>`:''}</span><span>${yes.length} going · ${no} can't</span></span></summary>
+      <div class="going-list">${yes.map(id=>`<span class="chip">${avatar(M.roster[id],M.photos[id],24,id)}${esc(firstName(M.roster[id]))}</span>`).join('')||'<span class="muted small">Nobody yet</span>'}</div></details>
+  </section>`;
+}
+async function saveEventReply(id,going){
+  const e=M.events.find(x=>x.id===id);if(!e||evOver(e))return;
+  if((M.evReplies[id]||{})[M.me]===going)return;
+  M.busy=true;render();
+  const d={eventId:id,memberId:M.me,going,uid:M.uid,at:new Date().toISOString()};
+  try{await db.doc('eventReplies/'+id+'_'+M.me).set(d);(M.evReplies[id]=M.evReplies[id]||{})[M.me]=going;toast(going?"You're down as going":'Thanks for letting us know')}
+  catch(err){toast(evOver(e)?'Replies are closed for this event.':"Couldn't save your reply. Try again.")}
+  M.busy=false;render();
+}
+
 function homeHTML(){
   const today=sgToday();
   const up=M.sessions.filter(x=>x.date>=today).sort((a,b)=>a.date.localeCompare(b.date));
-  const bar=`<div class="hello">${M.me?`<button class="avbtn" data-act="profile" aria-label="Your profile">${meAv(44)}</button>`:''}<div><div class="hi">Hi${M.me?` ${esc(firstName(M.roster[M.me]||''))}`:''}</div><div class="small muted">${up.length?`${up.length} training${up.length>1?'s':''} coming up`:'No trainings posted yet'}</div></div><div class="row">${M.admin?'<a class="btnlink" href="coach.html">Coach view</a>':''}<button class="ghost" data-act="profile" aria-expanded="${M.showProfile}">${M.showProfile?'Close':'Profile'}</button></div></div>${M.showProfile?profileHTML():''}`;
+  const evs=M.events.filter(e=>e.date>=today&&!evOver(e));
+  const items=[...up.map(x=>({k:x.date+' '+(x.start||'15:30'),html:()=>trainingHTML(x)})),...evs.map(e=>({k:e.date+' '+(e.start||''),html:()=>eventHTML(e)}))].sort((a,b)=>a.k.localeCompare(b.k));
+  const sub=[up.length?`${up.length} training${up.length>1?'s':''}`:'',evs.length?`${evs.length} event${evs.length>1?'s':''}`:''].filter(Boolean).join(' and ');
+  const bar=`<div class="hello">${M.me?`<button class="avbtn" data-act="profile" aria-label="Your profile">${meAv(44)}</button>`:''}<div><div class="hi">Hi${M.me?` ${esc(firstName(M.roster[M.me]||''))}`:''}</div><div class="small muted">${sub?sub+' coming up':'Nothing posted yet'}</div></div><div class="row">${M.admin?'<a class="btnlink" href="coach.html">Coach view</a>':''}<button class="ghost" data-act="profile" aria-expanded="${M.showProfile}">${M.showProfile?'Close':'Profile'}</button></div></div>${M.showProfile?profileHTML():''}`;
   if(!M.me)return bar+`<section class="card"><h2>Link your name</h2><p class="muted" style="margin:0">To reply to trainings, find your name and an exco will confirm it. You only do this once.</p><div class="row"><button class="primary" data-act="tolink">Find my name</button></div></section>`;
   return `${bar}
-    ${up.length?up.map(trainingHTML).join(''):`<section class="card"><h2>No trainings posted</h2><p class="muted" style="margin:0">When the excos post the next training, it'll show here and you can reply.</p></section>`}`;
+    ${items.length?items.map(i=>i.html()).join(''):`<section class="card"><h2>Nothing posted yet</h2><p class="muted" style="margin:0">When the excos post the next training or event, it'll show here and you can reply.</p></section>`}`;
 }
 
 const A={
@@ -183,6 +221,7 @@ const A={
     return saveReply(date,status,'','');
   },
   rsCancel(){M.form=null;M.err=''},
+  evReply({id,g}){return saveEventReply(id,g==='1')},
   async photoRemove(){M.photoErr='';try{await db.doc('photos/'+M.me).set({src:'',by:M.uid,at:new Date().toISOString()});M.photos[M.me]='';toast('Photo removed')}catch(e){M.photoErr="Couldn't remove it. Try again."}render()},
   rsSave(){const f=M.form;if(!f)return;const reason=String(f.reason||'').trim();
     if(!reason){M.err=f.status==='no'?'Let the excos know why you can no longer make it.':'Add a reason so the excos can plan around it.';return}
@@ -249,6 +288,8 @@ function startData(){
   db.collection('photos').onSnapshot(s=>{M.photos=Object.fromEntries(s.docs.map(x=>[x.id,x.data().src||'']));
     if(!M.photosLoaded){M.photosLoaded=true;useTelegramPhoto(s.docs.some(x=>x.id===M.me))}render()},()=>{});
   db.collection('rsvpNotes').where('memberId','==',M.me).onSnapshot(s=>{M.notes=Object.fromEntries(s.docs.map(x=>[x.data().date,x.data()]));render()},()=>{});
+  db.collection('events').where('published','==',true).onSnapshot(s=>{M.events=s.docs.map(x=>({...x.data(),id:x.id}));render()},()=>{});
+  db.collection('eventReplies').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.eventId]=o[v.eventId]||{})[v.memberId]=v.going});M.evReplies=o;render()},()=>{});
   db.collection('rsvps').where('date','>=',today).onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]={...v,status:v.status||(v.going?'yes':'no')}});M.rsvps=o;render()},fail);
 }
 

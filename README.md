@@ -102,6 +102,10 @@ The tests use a fake project, so they never touch the real database or its daily
 2. Replies show in Attendance: ✓ coming, L coming late, E leaving early, ✕ can't make it. **Late, leaving early and reasons** lists who and why, and a button ticks everyone who's coming.
 3. Build the plan and teams. When you're ready, tick **Show teams and game lineups to members** and save again.
 
+## Tournaments, friendlies and socials
+
+On the Plan tab, pick a day and tap **+ Add a tournament, friendly or social**. Give it a title, time, place, and optionally a cost and details. Tick **Members can see this event and reply** to post it. Members see it in their list with the trainings and tap I'm going or Can't make it; replies close when the event ends. Open the event again to see who's going.
+
 ## Security
 
 `firestore.rules` controls access:
