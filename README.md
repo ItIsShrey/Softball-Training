@@ -70,6 +70,10 @@ How it works for people:
 gh secret set FIREBASE_SERVICE_ACCOUNT < path/to/key.json
 ```
 
+Until the secret is added, the deploy is skipped with a warning instead of failing.
+
+Every pull request also runs two checks: **Code check** (syntax errors in the pages and the Worker) and **Rules tests** (below). To stop anything merging until both pass: Settings → Branches → Add rule for `main` → tick **Require status checks to pass before merging** → pick `code` and `rules`.
+
 Security rules are not deployed automatically. After a change to `firestore.rules` is merged, run `firebase deploy --only firestore:rules`.
 
 ## Rules tests
