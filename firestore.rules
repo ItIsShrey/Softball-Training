@@ -77,6 +77,14 @@ service cloud.firestore {
         && (!(d.status in ['late', 'early']) || d.get('reason', '').size() > 0);
     }
     function wasComing() { return resource != null && resource.data.going == true; }
+    // Replies close 3 hours after the training starts. Dates and times are Singapore time (UTC+8).
+    function repliesOpen(date) {
+      let s = get(/databases/$(database)/documents/sessions/$(date)).data;
+      let d = date.split('-');
+      let t = s.get('start', '15:30').split(':');
+      return request.time < timestamp.date(int(d[0]), int(d[1]), int(d[2]))
+        + duration.value(int(t[0]) * 60 + int(t[1]) - 8 * 60 + 3 * 60, 'm');
+    }
     match /rsvps/{rid} {
       allow read: if isAdmin() || isLinked();
       allow delete: if isAdmin();
@@ -88,7 +96,11 @@ service cloud.firestore {
         && rid == request.resource.data.date + '_' + request.resource.data.memberId
         && claimedMember() == request.resource.data.memberId
         && get(/databases/$(database)/documents/sessions/$(request.resource.data.date)).data.published == true
+        && repliesOpen(request.resource.data.date)
       );
     }
+
+    // The Worker marks each exco alert it has sent here, so one change is never posted twice. No page access.
+    match /notified/{id} { allow read, write: if false; }
   }
 }

@@ -71,10 +71,15 @@ async function notifyExcos(request, env, cors) {
   const prev = val(reply, 'prev') || '';
   if (status === 'yes' && !prev) return done('first yes, nothing to report');
 
-  // Once per saved change, even if the page calls twice.
-  const seen = new Request(`https://dedup.local/${date}_${memberId}/${encodeURIComponent(reply.updateTime)}`);
-  if (await caches.default.match(seen)) return done('already sent');
-  await caches.default.put(seen, new Response('1', { headers: { 'Cache-Control': 'max-age=86400' } }));
+  // Once per saved change, even if the page calls twice or someone calls again. Creating this marker fails
+  // if it already exists, so only the first call for a given save gets past here.
+  const marker = `${date}_${memberId}_${reply.updateTime.replace(/\D/g, '')}`;
+  const claim = await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/notified?documentId=${marker}`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { at: { timestampValue: new Date(now).toISOString() } } }),
+  });
+  if (claim.status === 409) return done('already sent');
+  if (!claim.ok) return done(`could not mark as sent: ${claim.status}`);
 
   const time = val(reply, 'time');
   const reason = val(reply, 'reason');

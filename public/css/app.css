@@ -218,5 +218,12 @@ details[open] summary{margin-bottom:8px}
 .badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--bad);color:#fff;font-size:11px;font-weight:700;line-height:1;vertical-align:1px}
 .li.req{align-items:center}
 .li.req select{max-width:220px}
-@media (max-width:480px){.brand{font-size:14px}h2{font-size:16px}}
+@media (max-width:480px){
+  .brand{font-size:14px}h2{font-size:16px}
+  /* Phones: the tabs get their own row under the name instead of scrolling sideways. */
+  .top .wrap{flex-wrap:wrap;row-gap:6px}
+  .top .brand{flex-basis:100%}
+  .top .tabs{overflow:visible;flex-wrap:wrap;gap:2px}
+  .top .tabs a{padding:5px 9px;font-size:13px}
+}
 .post-row{align-items:center}

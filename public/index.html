@@ -57,7 +57,9 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const toMin=t=>{const[h,m]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0)};
 const fmt=m=>{const h=Math.floor(m/60),mm=((m%60)+60)%60;return (((h+11)%12)+1)+':'+String(mm).padStart(2,'0')};
 const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-const pretty=s=>new Date(s+'T12:00:00').toLocaleDateString('en-SG',{weekday:'short',day:'numeric',month:'short'});
+const pretty=s=>new Date(s+'T12:00:00Z').toLocaleDateString('en-SG',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'});
+// Trainings are in Singapore, so "today" and start times are Singapore time whatever the phone is set to.
+const sgToday=()=>new Date(Date.now()+8*3600e3).toISOString().slice(0,10);
 const blockMin=b=>b.kind==='rotation'?(+b.per||0)*(b.stations||[]).length:(+b.minutes||0);
 const ordinal=n=>n+(['th','st','nd','rd'][(n%100-20)%10]||['th','st','nd','rd'][n%100]||'th');
 const firstName=n=>{n=String(n||'');if(n.includes(','))return n.split(',')[1].trim();return n};
@@ -128,11 +130,12 @@ function trainingHTML(x){
   const rv=M.rsvps[x.date]||{};const yes=Object.keys(rv).filter(id=>rv[id].going&&M.roster[id]);const no=Object.keys(rv).filter(id=>!rv[id].going).length;
   const late=yes.filter(id=>rv[id].status!=='yes').length;
   const mine=myRsvp(x.date),st=mine&&mine.status,going=!!(mine&&mine.going);
-  const f=M.form&&M.form.date===x.date?M.form:null;
+  const shut=closed(x.date);
+  const f=!shut&&M.form&&M.form.date===x.date?M.form:null;
   const team=x.teamsVisible&&(x.attendees||[]).includes(M.me)?(x.teams||{})[M.me]:null;
   let teamBox='';
   if(x.teamsVisible){
-    if(team==null)teamBox=`<div class="myteam"><span class="muted">Teams are out, and you're not on the list for this one. Tell an exco if you're coming.</span></div>`;
+    if(team==null)teamBox=st==='no'?'':`<div class="myteam"><span class="muted">Teams are out, and you're not on the list for this one. Tell an exco if you're coming.</span></div>`;
     else{
       const mates=(x.attendees||[]).filter(id=>(x.teams||{})[id]===team&&id!==M.me&&M.roster[id]).map(id=>M.roster[id]).sort();
       const hasGame=(x.blocks||[]).some(b=>b.category==='game');
@@ -155,12 +158,12 @@ function trainingHTML(x){
   return `<section class="card">
     <div><div class="tr-date">${esc(pretty(x.date))}</div>
     <div class="tr-meta"><span>${esc(VENUES[x.venue]||x.venue)}</span><span>${fmt(start)}–${fmt(end)}pm</span></div></div>
-    <div class="rsvp" role="group" aria-label="Are you coming?">
+    ${shut?`<div class="mynote">Replies are closed for this training.${st?` You said: <b>${esc(STATUS[st])}</b>.`:''}</div>`:`<div class="rsvp" role="group" aria-label="Are you coming?">
       <button class="y" data-act="rsvp" data-date="${x.date}" data-s="yes" aria-pressed="${going}">${going?'✓ ':''}I'm coming</button>
       <button class="n" data-act="rsvp" data-date="${x.date}" data-s="no" aria-pressed="${st==='no'}">${st==='no'?'✕ ':''}Can't make it</button>
     </div>
     ${going?`<div class="rsvp2" role="group" aria-label="Coming for part of it?"><button data-act="rsvp" data-date="${x.date}" data-s="late" aria-pressed="${st==='late'}">Coming late</button><button data-act="rsvp" data-date="${x.date}" data-s="early" aria-pressed="${st==='early'}">Leaving early</button></div>`:''}
-    ${f?replyFormHTML(x,f):mine&&(mine.reason||mine.time)&&st!=='yes'?`<div class="mynote">${esc(STATUS[st])}${mine.time?`, ${st==='late'?'arriving':'leaving'} ${fmt(toMin(mine.time))}`:''}${mine.reason?` · ${esc(mine.reason)}`:''} <button class="ghost" data-act="rsvp" data-date="${x.date}" data-s="${st}" style="padding:2px 8px;font-size:13px">Change</button></div>`:''}
+    ${f?replyFormHTML(x,f):mine&&(mine.reason||mine.time)&&st!=='yes'?`<div class="mynote">${esc(STATUS[st])}${mine.time?`, ${st==='late'?'arriving':'leaving'} ${fmt(toMin(mine.time))}`:''}${mine.reason?` · ${esc(mine.reason)}`:''} <button class="ghost" data-act="rsvp" data-date="${x.date}" data-s="${st}" style="padding:2px 8px;font-size:13px">Change</button></div>`:''}`}
     <details${M.open[x.date]?' open':''} data-open="${x.date}"><summary>${yes.length} coming${late?` (${late} late or leaving early)`:''} · ${no} can't</summary>
       <div class="names" style="margin-top:6px">${yes.map(id=>esc(firstName(M.roster[id]))+(rv[id].status==='late'?' (late)':rv[id].status==='early'?' (leaving early)':'')).sort().join(' · ')||'<span class="muted">Nobody yet</span>'}</div></details>
     ${teamBox}
@@ -178,10 +181,12 @@ function replyFormHTML(x,f){
     ${M.err?`<div class="banner bad">${esc(M.err)}</div>`:''}
     <div class="row"><button class="primary" data-act="rsSave"${M.busy?' disabled':''}>${M.busy?'Saving…':'Save'}</button><button class="ghost" data-act="rsCancel">Cancel</button></div></div>`;
 }
-function startsAt(date){const x=M.sessions.find(s=>s.date===date);return new Date(date+'T'+((x&&x.start)||'15:30')+':00').getTime()}
+function startsAt(date){const x=M.sessions.find(s=>s.date===date);return Date.parse(date+'T'+((x&&x.start)||'15:30')+':00+08:00')}
+// Replies close 3 hours after the start (the database enforces this too).
+const closed=date=>Date.now()>startsAt(date)+3*3600e3;
 
 function homeHTML(){
-  const today=iso(new Date());
+  const today=sgToday();
   const up=M.sessions.filter(x=>x.date>=today).sort((a,b)=>a.date.localeCompare(b.date));
   const bar=`<div class="me-bar"><span>Hi${M.me?` <b>${esc(firstName(M.roster[M.me]||''))}</b>`:''}</span><div class="row">${M.admin?'<a class="btnlink" href="coach.html">Coach view</a>':''}<button class="ghost" data-act="profile" aria-expanded="${M.showProfile}">Profile</button></div></div>${M.showProfile?profileHTML():''}`;
   if(!M.me)return bar+`<section class="card"><h2>Link your name</h2><p class="muted" style="margin:0">To reply to trainings, find your name and an exco will confirm it. You only do this once.</p><div class="row"><button class="primary" data-act="tolink">Find my name</button></div></section>`;
@@ -206,6 +211,7 @@ const A={
   async cancelReq(){try{await db.doc('linkRequests/'+M.uid).delete()}catch(e){}M.req=null;M.pick=null;M.q='';render()},
   async switch(){try{await db.doc('claims/'+M.uid).delete()}catch(e){}M.me=null;M.pick=null;await logOut();location.reload()},
   rsvp({date,s:status}){
+    if(closed(date))return;
     const cur=myRsvp(date);M.err='';
     if(status==='late'||status==='early'){M.form={date,status,time:cur&&cur.status===status?cur.time||'':'',reason:cur&&cur.status===status?cur.reason||'':''};return}
     if(status==='no'&&cur&&cur.going){M.form={date,status,reason:''};return}
@@ -231,7 +237,7 @@ async function saveReply(date,status,time,reason){
   try{await db.doc('rsvps/'+date+'_'+M.me).set(d);(M.rsvps[date]=M.rsvps[date]||{})[M.me]=d;M.form=null;M.err='';
     toast(status==='no'?'Thanks for letting us know':status==='yes'?"You're down as coming":"Saved. The excos can see it");
     const t=startsAt(date),now=Date.now();if(t-now<6*3600e3&&now<t+3*3600e3&&(status!=='yes'||prev))notifyExcos(date,M.me)}
-  catch(e){M.err="Couldn't save your reply. Try again.";if(!M.form)toast(M.err)}
+  catch(e){M.err=closed(date)?'Replies are closed for this training.':"Couldn't save your reply. Try again.";if(!M.form)toast(M.err)}
   M.busy=false;render();
 }
 let rosterStarted=false;
@@ -260,7 +266,7 @@ function watchLink(){
 let dataStarted=false;
 function startData(){
   if(dataStarted)return;dataStarted=true;
-  const today=iso(new Date());
+  const today=sgToday();
   const fail=()=>{M.status='error';render()};
   db.collection('sessions').where('published','==',true).onSnapshot(s=>{M.sessions=s.docs.map(x=>({...x.data(),date:x.id}));render()},fail);
   db.collection('rsvps').where('date','>=',today).onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]={...v,status:v.status||(v.going?'yes':'no')}});M.rsvps=o;render()},fail);
