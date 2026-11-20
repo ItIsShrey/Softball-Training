@@ -11,9 +11,16 @@ concurrency: deploy
 jobs:
   hosting:
     runs-on: ubuntu-latest
+    env:
+      HAS_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      # Without the secret there's nothing to deploy with: skip with a note instead of failing.
+      - if: env.HAS_KEY != 'true'
+        run: echo "::warning::Not deployed. Add the FIREBASE_SERVICE_ACCOUNT secret (README, Deploy on merge) to turn on auto-deploy."
+      - if: env.HAS_KEY == 'true'
+        uses: actions/checkout@v4
+      - if: env.HAS_KEY == 'true'
+        uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

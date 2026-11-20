@@ -1,0 +1,15 @@
+# Checks the pages and the Worker for syntax errors on every pull request, so broken code can't be merged and deployed.
+name: Code check
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  code:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node .github/scripts/check-code.mjs
