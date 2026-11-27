@@ -24,8 +24,9 @@ export function avatar(name, src, size = 32, key = name) {
     : `<span class="av" style="${style}"><i>${escAttr(initials(name))}</i></span>`;
 }
 
-// Shrinks a picked image to a small square JPEG (about 5–10 KB) so it fits in the database.
-export function shrinkPhoto(file, size = 160) {
+// Shrinks a picked image to a small square JPEG (about 3–6 KB) so it fits in the database and loads fast.
+// The biggest avatar on screen is 64px, so 128px stays sharp on high-resolution phones.
+export function shrinkPhoto(file, size = 128) {
   return new Promise((resolve, reject) => {
     if (!file || !/^image\//.test(file.type)) return reject(new Error('not_image'));
     const url = URL.createObjectURL(file);

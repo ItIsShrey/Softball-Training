@@ -25,6 +25,9 @@ export default {
     if (request.method === 'POST' && url.pathname === '/notify') {
       return notifyExcos(request, env, cors).catch(e => { console.log('notify error', String(e && e.message || e)); return new Response(null, { status: 204, headers: cors }); });
     }
+    if (request.method === 'POST' && url.pathname === '/announce-event') {
+      return announceEvent(request, env, cors).catch(e => { console.log('announce event error', String(e && e.message || e)); return json({ error: 'failed' }, 500, cors); });
+    }
     if (request.method === 'POST' && url.pathname === '/announce') {
       return announceTraining(request, env, cors).catch(e => { console.log('announce error', String(e && e.message || e)); return json({ error: 'failed' }, 500, cors); });
     }
@@ -147,6 +150,55 @@ async function announceTraining(request, env, cors) {
   if (!res.ok) { console.log('announce telegram', res.status, await res.text()); return json({ error: 'telegram_failed' }, 502, cors); }
   const announcedAt = new Date().toISOString();
   await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/sessions/${date}?updateMask.fieldPaths=announcedAt`, {
+    method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { announcedAt: { stringValue: announcedAt } } }),
+  });
+  return json({ ok: true, announcedAt }, 200, cors);
+}
+
+// Posting a tournament, friendly or social to the group. Same checks as trainings: a signed-in exco, and the event is published.
+const EVHEAD = { tournament: '🏆 <b>TOURNAMENT</b> 🏆', friendly: '🥎 <b>FRIENDLY GAME</b> 🥎', social: '🎉 <b>TEAM SOCIAL</b> 🎉' };
+async function announceEvent(request, env, cors) {
+  const chat = env.ANNOUNCE_CHAT_ID || env.GROUP_CHAT_ID;
+  if (!chat || !env.FIREBASE_PROJECT_ID) return json({ error: 'no_chat' }, 409, cors);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'bad_request' }, 400, cors); }
+  const { idToken, id } = body || {};
+  if (!/^[A-Za-z0-9]{1,40}$/.test(String(id))) return json({ error: 'bad_request' }, 400, cors);
+  const uid = await verifyIdToken(env, String(idToken || ''));
+  if (!uid) return json({ error: 'not_signed_in' }, 401, cors);
+  const token = await googleAccessToken(env);
+  const always = String(env.ALWAYS_ALLOW || '').split(',').map(s => 'tg:' + s.trim());
+  if (!always.includes(uid) && !(await firestoreGet(env, token, `admins/${uid}`))) return json({ error: 'not_exco' }, 403, cors);
+  const ev = await firestoreGet(env, token, `events/${id}`);
+  if (!ev || val(ev, 'published') !== true) return json({ error: 'not_published' }, 409, cors);
+
+  const date = String(val(ev, 'date') || '');
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T12:00:00+08:00`).toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Singapore' }) : '';
+  const type = String(val(ev, 'type') || '');
+  const title = String(val(ev, 'title') || '').slice(0, 80);
+  const venue = String(val(ev, 'venue') || '').slice(0, 80);
+  const cost = String(val(ev, 'cost') || '').slice(0, 40);
+  const notes = String(val(ev, 'notes') || '').trim().slice(0, 600);
+  const text = [
+    EVHEAD[type] || '📣 <b>TEAM EVENT</b> 📣',
+    '',
+    title ? `<b>${esc(title)}</b>` : '',
+    day ? `📅 <b>${esc(day)}</b>` : '',
+    val(ev, 'start') ? `⏰ ${clock(val(ev, 'start'))} – ${clock(val(ev, 'end'))}` : '',
+    venue ? `📍 ${esc(venue)}` : '',
+    cost ? `💵 ${esc(cost)}` : '',
+    notes ? `\n${esc(notes)}` : '',
+    '',
+    '👇 Let us know if you\'re going!',
+  ].filter((l, i, a) => l || a[i - 1]).join('\n');
+  const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [[{ text: '🙋 I\'m going / can\'t make it', url: env.ALLOWED_ORIGIN }]] } }),
+  });
+  if (!res.ok) { console.log('announce event telegram', res.status, await res.text()); return json({ error: 'telegram_failed' }, 502, cors); }
+  const announcedAt = new Date().toISOString();
+  await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/events/${id}?updateMask.fieldPaths=announcedAt`, {
     method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ fields: { announcedAt: { stringValue: announcedAt } } }),
   });

@@ -1,5 +1,6 @@
 // Checks firestore.rules against the Firestore emulator. Run with `npm test` in this folder (needs Java).
 import { test, before, after, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
@@ -231,4 +232,22 @@ test('members see published events and reply until the event ends', async () => 
   await assertFails(setDoc(doc(db, 'eventReplies', 'e1_m1'), ev({ extra: 1 })));
   await assertFails(deleteDoc(doc(db, 'eventReplies', 'e1_m1')));
   await assertSucceeds(getDocs(collection(db, 'eventReplies')));
+});
+
+test('the member page queries: upcoming posted trainings, and replies for a few events', async () => {
+  await env.withSecurityRulesDisabled(async ctx => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'sessions', '2020-01-01'), { published: true });
+    await setDoc(doc(db, 'sessions', '2030-01-01'), { published: true });
+    await setDoc(doc(db, 'sessions', '2030-01-03'), { published: false });
+    await setDoc(doc(db, 'eventReplies', 'e1_m1'), { eventId: 'e1', memberId: 'm1', going: true });
+    await setDoc(doc(db, 'eventReplies', 'e9_m1'), { eventId: 'e9', memberId: 'm1', going: true });
+  });
+  const db = as(MEMBER);
+  const s = await assertSucceeds(getDocs(query(collection(db, 'sessions'), where('published', '==', true), where('__name__', '>=', '2025-01-01'))));
+  const ids = s.docs.map(d => d.id);
+  assert.ok(ids.includes('2030-01-01') && !ids.includes('2020-01-01') && !ids.includes('2030-01-03'));
+  const r = await assertSucceeds(getDocs(query(collection(db, 'eventReplies'), where('eventId', 'in', ['e1', 'e2']))));
+  assert.deepEqual(r.docs.map(d => d.id), ['e1_m1']);
+  await assertFails(getDocs(query(collection(db, 'sessions'), where('__name__', '>=', '2025-01-01'))));
 });
