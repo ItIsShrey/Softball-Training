@@ -1,6 +1,9 @@
 // Small UI helpers shared by both pages: profile photos and avatars.
 const escAttr = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// A photo that fails to load falls back to the initials underneath (no inline handlers, so the security policy can block them).
+if (typeof document !== 'undefined') document.addEventListener('error', e => { const t = e.target; if (t && t.tagName === 'IMG' && t.parentElement && t.parentElement.classList.contains('av')) t.remove(); }, true);
+
 // Only these photo sources are ever shown (the database rules allow the same).
 export const safePhoto = src => typeof src === 'string' && (/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(src) || /^https:\/\/t\.me\/i\/userpic\/[^"'<>\s]+$/.test(src)) ? src : '';
 
@@ -17,7 +20,7 @@ export function avatar(name, src, size = 32, key = name) {
   const s = safePhoto(src);
   const style = `--s:${size}px;--h:${hue(key)}`;
   return s
-    ? `<span class="av" style="${style}"><img src="${escAttr(s)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"><i>${escAttr(initials(name))}</i></span>`
+    ? `<span class="av" style="${style}"><img src="${escAttr(s)}" alt="" loading="lazy" referrerpolicy="no-referrer"><i>${escAttr(initials(name))}</i></span>`
     : `<span class="av" style="${style}"><i>${escAttr(initials(name))}</i></span>`;
 }
 

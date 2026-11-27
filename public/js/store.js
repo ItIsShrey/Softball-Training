@@ -2,7 +2,7 @@
 // db.collection(path).onSnapshot(...), db.doc(path).set(...), db.collection(path).doc() for a new id.
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import { getAuth, onAuthStateChanged, signOut, signInWithCustomToken } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { getFirestore, collection, doc, onSnapshot, setDoc, deleteDoc, updateDoc, getDoc, query, where } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, onSnapshot, setDoc, deleteDoc, updateDoc, getDoc, query, where, writeBatch } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { firebaseConfig, telegram, owner } from './firebase-config.js';
 export { telegram, owner };
 export const telegramEnabled = !!(telegram && telegram.bot && telegram.authUrl);
@@ -10,7 +10,8 @@ export const telegramEnabled = !!(telegram && telegram.bot && telegram.authUrl);
 export const configured = !String(firebaseConfig.apiKey).includes('REPLACE_ME');
 const app = configured ? initializeApp(firebaseConfig) : null;
 export const auth = app ? getAuth(app) : null;
-const fs = app ? getFirestore(app) : null;
+// Keeps a copy of the data on the device, so reopening the page loads fast and re-downloads only what changed.
+const fs = app ? initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }) : null;
 
 export function currentUser() {
   return new Promise(resolve => { const stop = onAuthStateChanged(auth, u => { stop(); resolve(u); }); });
@@ -37,10 +38,13 @@ export async function telegramProfile() {
   return { name: saved.name || '', username: claims.tgUsername || '', photo: saved.photo || '' };
 }
 // Tells the excos' Telegram chat about a last-minute reply change. The Worker reads the reply itself and
-// only posts real changes made in the 6 hours before a training, so this can't be used to send anything else.
-export function notifyExcos(date, memberId) {
+// only posts real changes made in the 6 hours before a training, and only for the member who made them.
+export async function notifyExcos(date, memberId) {
   if (!telegram.authUrl) return;
-  fetch(telegram.authUrl.replace(/\/auth\/telegram$/, '/notify'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, memberId }) }).catch(() => {});
+  try {
+    const idToken = await auth.currentUser.getIdToken();
+    await fetch(telegram.authUrl.replace(/\/auth\/telegram$/, '/notify'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken, date, memberId }) });
+  } catch (e) {}
 }
 // Asks the bot to post a published training to the club's Telegram group. Only excos can.
 export async function announceTraining(date) {
@@ -91,4 +95,10 @@ function col(path, filters = []) {
     onSnapshot: (next, err) => onSnapshot(q(), s => next(wrapQuery(s)), err),
   };
 }
-export const db = { collection: col, doc: ref };
+// Several writes that land together or not at all: [['set', path, data], ['delete', path]].
+async function batch(ops) {
+  const b = writeBatch(fs);
+  for (const [op, path, data] of ops) op === 'delete' ? b.delete(doc(fs, path)) : b.set(doc(fs, path), data);
+  await b.commit();
+}
+export const db = { collection: col, doc: ref, batch };

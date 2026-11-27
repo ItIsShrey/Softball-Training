@@ -76,6 +76,14 @@ Every pull request also runs two checks: **Code check** (syntax errors in the pa
 
 Security rules are not deployed automatically. After a change to `firestore.rules` is merged, run `firebase deploy --only firestore:rules`.
 
+## Handing over the club
+
+The owner (the only one who can add or remove excos) is set in two places. To hand over, put the new owner's code (`tg:<number>`, on their profile) in both, then merge and run `firebase deploy --only firestore:rules`:
+- `owner` in `public/js/firebase-config.js`
+- `isOwner()` in `firestore.rules`
+
+Also change `ALWAYS_ALLOW` in `worker/wrangler.toml` to the new owner's number and run `npx wrangler deploy`.
+
 ## Rules tests
 
 `tests/rules.test.js` checks `firestore.rules` against the Firestore emulator. GitHub runs it on every pull request. To run it yourself (needs Java 11 or newer):
@@ -94,21 +102,28 @@ The tests use a fake project, so they never touch the real database or its daily
 2. Replies show in Attendance: ✓ coming, L coming late, E leaving early, ✕ can't make it. **Late, leaving early and reasons** lists who and why, and a button ticks everyone who's coming.
 3. Build the plan and teams. When you're ready, tick **Show teams and game lineups to members** and save again.
 
+## Tournaments, friendlies and socials
+
+On the Plan tab, pick a day and tap **+ Add a tournament, friendly or social**. Give it a title, time, place, and optionally a cost and details. Tick **Members can see this event and reply** to post it. Members see it in their list with the trainings and tap I'm going or Can't make it; replies close when the event ends. Open the event again to see who's going.
+
 ## Security
 
 `firestore.rules` controls access:
 - Only Telegram logins get anything. With `GROUP_CHAT_ID` set, only club group members can log in.
 - A new login can read the list of names, to find their own. Trainings and replies need a login linked to a name.
 - Levels, genders and drills are visible to excos only. Only the owner adds or removes excos.
-- Members can only reply for themselves. Coming late, leaving early, or changing a yes to a no needs a reason.
+- Members can only reply for themselves. Coming late, leaving early, or changing a yes to a no needs a reason. Reasons and times are stored apart from the reply (`rsvpNotes`), so only that member and the excos can read them.
+- Replies close 3 hours after a training starts.
+- The site sends a Content-Security-Policy and other security headers (`firebase.json`). If you add a new outside service (a script, font or API), add its address there too or the browser will block it.
+- The Worker rate-limits login, alert and post requests per visitor (`worker/wrangler.toml`).
 - Profile photos are small images kept in the database (no Firebase Storage, so no paid plan). Members change only their own; a member's Telegram photo is used until they pick one.
 - Don't put anything sensitive in a training plan.
 
 ## Files
 
 ```
-public/index.html          member view
-public/coach.html          coach and exco view
+public/index.html          member view (code in public/js/member.js)
+public/coach.html          coach and exco view (code in public/js/coach.js)
 public/css/app.css         shared styles (light and dark)
 public/js/store.js         Firebase setup and a small database wrapper
 public/js/firebase-config.js   your project's config, Telegram settings and the owner

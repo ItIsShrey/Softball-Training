@@ -66,17 +66,20 @@ service cloud.firestore {
     }
 
     // Replies: id is <date>_<memberId>. status is yes, late, early or no; going is true unless status is no.
-    // Coming late or leaving early needs a reason, and so does changing a yes to a no.
+    // Everyone linked can see who's coming. The time and reason live in rsvpNotes (same id), which only the
+    // member and the excos can read. Coming late, leaving early, or changing a yes to a no needs a reason there.
     function replyOk(d) {
-      return d.keys().hasOnly(['date', 'memberId', 'going', 'status', 'time', 'reason', 'prev', 'uid', 'at'])
+      return d.keys().hasOnly(['date', 'memberId', 'going', 'status', 'prev', 'uid', 'at'])
         && d.status in ['yes', 'late', 'early', 'no']
         && d.going == (d.status != 'no')
-        && d.get('time', '') is string && d.get('time', '').size() <= 5
-        && d.get('reason', '') is string && d.get('reason', '').size() <= 200
         && d.get('prev', '') in ['', 'yes', 'late', 'early', 'no']
-        && (!(d.status in ['late', 'early']) || d.get('reason', '').size() > 0);
+        && d.at is string && d.at.size() <= 40;
     }
     function wasComing() { return resource != null && resource.data.going == true; }
+    function hasReason(rid) {
+      return existsAfter(/databases/$(database)/documents/rsvpNotes/$(rid))
+        && getAfter(/databases/$(database)/documents/rsvpNotes/$(rid)).data.reason.size() > 0;
+    }
     // Replies close 3 hours after the training starts. Dates and times are Singapore time (UTC+8).
     function repliesOpen(date) {
       let s = get(/databases/$(database)/documents/sessions/$(date)).data;
@@ -85,19 +88,37 @@ service cloud.firestore {
       return request.time < timestamp.date(int(d[0]), int(d[1]), int(d[2]))
         + duration.value(int(t[0]) * 60 + int(t[1]) - 8 * 60 + 3 * 60, 'm');
     }
+    // A member writing about their own published, still-open training.
+    function ownOpenReply(d, rid) {
+      return tgUser()
+        && d.uid == request.auth.uid
+        && rid == d.date + '_' + d.memberId
+        && claimedMember() == d.memberId
+        && get(/databases/$(database)/documents/sessions/$(d.date)).data.published == true
+        && repliesOpen(d.date);
+    }
     match /rsvps/{rid} {
       allow read: if isAdmin() || isLinked();
       allow delete: if isAdmin();
       allow create, update: if isAdmin() || (
-        tgUser()
-        && replyOk(request.resource.data)
-        && (request.resource.data.status != 'no' || !wasComing() || request.resource.data.get('reason', '').size() > 0)
-        && request.resource.data.uid == request.auth.uid
-        && rid == request.resource.data.date + '_' + request.resource.data.memberId
-        && claimedMember() == request.resource.data.memberId
-        && get(/databases/$(database)/documents/sessions/$(request.resource.data.date)).data.published == true
-        && repliesOpen(request.resource.data.date)
+        replyOk(request.resource.data)
+        && ownOpenReply(request.resource.data, rid)
+        && (!(request.resource.data.status in ['late', 'early']) || hasReason(rid))
+        && (request.resource.data.status != 'no' || !wasComing() || hasReason(rid))
       );
+    }
+    match /rsvpNotes/{rid} {
+      allow read: if isAdmin() || (isLinked() && resource.data.memberId == claimedMember());
+      allow create, update: if isAdmin() || (
+        request.resource.data.keys().hasOnly(['date', 'memberId', 'time', 'reason', 'uid', 'at'])
+        && request.resource.data.get('time', '') is string && request.resource.data.get('time', '').size() <= 5
+        && request.resource.data.reason is string && request.resource.data.reason.size() > 0 && request.resource.data.reason.size() <= 200
+        && request.resource.data.at is string && request.resource.data.at.size() <= 40
+        && ownOpenReply(request.resource.data, rid)
+      );
+      // The page clears the note (it may not exist) whenever a reply needs no reason. Ids are <date>_<memberId>.
+      allow delete: if isAdmin() || (isLinked() && rid.split('_').size() == 2
+        && rid.split('_')[1] == claimedMember() && repliesOpen(rid.split('_')[0]));
     }
 
     // Profile photos, one per member: a small image saved in the page, their Telegram photo, or '' when removed.
@@ -114,6 +135,28 @@ service cloud.firestore {
       allow read: if isAdmin() || isLinked();
       allow create, update: if (isAdmin() || (isLinked() && claimedMember() == memberId)) && photoOk(request.resource.data);
       allow delete: if isAdmin() || (isLinked() && claimedMember() == memberId);
+    }
+
+    // Tournaments, friendlies and socials. Excos create them; linked members see the published ones.
+    match /events/{id} {
+      allow read: if isAdmin() || (isLinked() && resource.data.published == true);
+      allow write: if isAdmin();
+    }
+    // A member's going / can't for an event, saved as <eventId>_<memberId>. Open until the event ends.
+    match /eventReplies/{rid} {
+      allow read: if isAdmin() || isLinked();
+      allow delete: if isAdmin();
+      allow create, update: if isAdmin() || (
+        tgUser()
+        && request.resource.data.keys().hasOnly(['eventId', 'memberId', 'going', 'uid', 'at'])
+        && request.resource.data.going is bool
+        && request.resource.data.at is string && request.resource.data.at.size() <= 40
+        && request.resource.data.uid == request.auth.uid
+        && rid == request.resource.data.eventId + '_' + request.resource.data.memberId
+        && claimedMember() == request.resource.data.memberId
+        && get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.published == true
+        && request.time < get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.endsAt
+      );
     }
 
     // The Worker marks each exco alert it has sent here, so one change is never posted twice. No page access.

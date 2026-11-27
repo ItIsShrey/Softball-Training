@@ -2,7 +2,8 @@
 // The bot token never leaves this Worker, so nobody can forge a Telegram login.
 // Telegram's check: https://core.telegram.org/widgets/login#checking-authorization
 
-const MAX_AGE_SECONDS = 24 * 60 * 60;
+// A Telegram login result is accepted for an hour after Telegram signs it, so a copied one can't be reused for long.
+const MAX_AGE_SECONDS = 60 * 60;
 const enc = new TextEncoder();
 
 export default {
@@ -15,6 +16,12 @@ export default {
     };
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const url = new URL(request.url);
+    // Cloudflare's rate limiter (wrangler.toml), per visitor IP. Skipped if the binding isn't set up.
+    if (request.method === 'POST' && env.LIMITER) {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const { success } = await env.LIMITER.limit({ key: `${url.pathname}:${ip}` });
+      if (!success) return json({ error: 'too_many_requests' }, 429, cors);
+    }
     if (request.method === 'POST' && url.pathname === '/notify') {
       return notifyExcos(request, env, cors).catch(e => { console.log('notify error', String(e && e.message || e)); return new Response(null, { status: 204, headers: cors }); });
     }
@@ -51,16 +58,21 @@ async function notifyExcos(request, env, cors) {
   if (!env.EXCO_CHAT_ID || !env.FIREBASE_PROJECT_ID) return done('EXCO_CHAT_ID or FIREBASE_PROJECT_ID not set');
   let body;
   try { body = await request.json(); } catch { return json({ error: 'bad_request' }, 400, cors); }
-  const { date, memberId } = body || {};
+  const { idToken, date, memberId } = body || {};
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date)) || !/^[A-Za-z0-9_-]{1,64}$/.test(String(memberId))) {
     return json({ error: 'bad_request' }, 400, cors);
   }
+  // Only the member who changed the reply can ask for the alert.
+  const uid = await verifyIdToken(env, String(idToken || ''));
+  if (!uid) return done('not signed in');
   const token = await googleAccessToken(env);
-  const [reply, session, person] = await Promise.all([
+  const [reply, note, session, person] = await Promise.all([
     firestoreGet(env, token, `rsvps/${date}_${memberId}`),
+    firestoreGet(env, token, `rsvpNotes/${date}_${memberId}`, true),
     firestoreGet(env, token, `sessions/${date}`),
     firestoreGet(env, token, `roster/${memberId}`),
   ]);
+  if (reply && val(reply, 'uid') !== uid) return done('not this member\'s reply');
   if (!reply || !session || !person || val(session, 'published') !== true) return done(`missing data: reply=${!!reply} session=${!!session} person=${!!person} published=${session && val(session, 'published')}`);
   const now = Date.now();
   const changedAt = Date.parse(reply.updateTime);
@@ -81,8 +93,9 @@ async function notifyExcos(request, env, cors) {
   if (claim.status === 409) return done('already sent');
   if (!claim.ok) return done(`could not mark as sent: ${claim.status}`);
 
-  const time = val(reply, 'time');
-  const reason = val(reply, 'reason');
+  // The time and reason are kept apart from the reply so other members can't read them.
+  const time = val(note, 'time');
+  const reason = val(note, 'reason');
   const day = new Date(`${date}T12:00:00+08:00`).toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Singapore' });
   const text = [
     `${val(person, 'name')}: ${STATUS[status] || status} on ${day}` + (prev && prev !== status ? ` (was ${(STATUS[prev] || prev).toLowerCase()})` : ''),
@@ -185,11 +198,11 @@ async function googleAccessToken(env) {
   cachedToken = { value: access_token, exp: now + (expires_in || 3600) };
   return access_token;
 }
-async function firestoreGet(env, token, path) {
+async function firestoreGet(env, token, path, quietIfMissing = false) {
   const res = await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) console.log('firestore read failed', path.split('/')[0], res.status, (await res.text()).slice(0, 200));
+  if (!res.ok && !(quietIfMissing && res.status === 404)) console.log('firestore read failed', path.split('/')[0], res.status, (await res.text()).slice(0, 200));
   return res.ok ? res.json() : null;
 }
 function val(doc, key) {
