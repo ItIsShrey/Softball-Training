@@ -1,5 +1,5 @@
 // Coach and exco view (coach.html).
-import { db, auth, configured, currentUser, logOut, telegramEnabled, owner, announceTraining } from './store.js';
+import { db, auth, configured, currentUser, logOut, telegramEnabled, owner, announceTraining, announceEvent } from './store.js';
 import { avatar } from './ui.js';
 const VENUES=[{id:'MPSH',label:'MPSH (hall)',kind:'MPSH',from:'15:30',to:'18:00'},{id:'Kallang',label:'Kallang field',kind:'Field',from:'15:30',to:'18:00'},{id:'Jurong',label:'Jurong field',kind:'Field',from:'15:30',to:'18:00'}];
 const venueOf=id=>VENUES.find(v=>v.id===id)||VENUES[0];
@@ -242,7 +242,8 @@ function eventPanelHTML(sel){
 function eventFormHTML(){
   const f=S.ev,rv=f.id?(S.evReplies[f.id]||{}):{};
   const going=S.members.filter(m=>rv[m.id]===true).sort((a,b)=>a.name.localeCompare(b.name)),cant=S.members.filter(m=>rv[m.id]===false).sort((a,b)=>a.name.localeCompare(b.name));
-  const none=S.members.filter(m=>m.active!==false&&!(m.id in rv)).length;
+  const left=S.members.filter(m=>m.active!==false&&!(m.id in rv)).sort((a,b)=>a.name.localeCompare(b.name)),none=left.length;
+  const live=f.id&&S.events[f.id],at=live&&live.announcedAt;
   return `<section class="card"><div class="card-h"><h2>${f.id?'Edit event':'New event'}</h2><button class="ghost" data-act="evClose">Close</button></div>
     <div style="display:grid;gap:6px"><span class="eyebrow">Type</span><div class="seg" role="group" aria-label="Event type">${EVTYPES.map(([k,l])=>`<button data-act="evType" data-t="${k}" aria-pressed="${f.type===k}">${l}</button>`).join('')}</div></div>
     <label class="f">Title<input id="ev-title" data-input="ev.title" value="${esc(f.title)}" maxlength="80" placeholder="${f.type==='tournament'?'e.g. IVP Softball':f.type==='social'?'e.g. Team dinner':'e.g. Friendly vs NUS'}" autocomplete="off"></label>
@@ -252,7 +253,11 @@ function eventFormHTML(){
     <label class="f">Details (optional)<textarea id="ev-notes" data-input="ev.notes" maxlength="1000" placeholder="What to bring, meeting point, dress code">${esc(f.notes)}</textarea></label>
     <label class="check"><input type="checkbox" data-evpub${f.published?' checked':''}><span>Members can see this event and reply</span></label>
     ${f.id&&f.published?`<div style="display:grid;gap:6px"><span class="eyebrow">Replies</span><div class="row small"><span class="pill good">${going.length} going</span><span class="pill bad">${cant.length} can't</span><span class="muted">${none} no reply</span></div>
-      ${going.length?`<div class="chips">${going.map(m=>`<span class="chip">${av(m,22)}${esc(m.name)}</span>`).join('')}</div>`:''}</div>`:''}
+      ${going.length?`<div class="chips">${going.map(m=>`<span class="chip">${av(m,22)}${esc(m.name)}</span>`).join('')}</div>`:''}
+      ${none?`<details><summary>See who hasn't replied</summary><div class="chips">${left.map(m=>`<span class="chip">${av(m,22)}${esc(m.name)}</span>`).join('')}</div>
+        <div class="row"><button class="ghost" data-act="evCopyAt">Copy their @usernames</button></div></details>`:''}</div>`:''}
+    ${f.id&&telegramEnabled?`<div class="row post-row"><button data-act="evPost"${live&&live.published&&!S.posting?'':' disabled'}>${S.posting?'Posting…':S.confirm==='evpost'?'Tap again to post it again':at?'Post to the group again':'Post to the Telegram group'}</button>
+      <span class="small muted">${!live||!live.published?'Tick "Members can see this event" and save first.':at?`Posted ${esc(new Date(at).toLocaleString('en-SG',{weekday:'short',day:'numeric',month:'short',hour:'numeric',minute:'2-digit',timeZone:'Asia/Singapore'}))}.`:'The bot posts the event with a button to reply.'}</span></div>`:''}
     <div class="row"><button class="primary" data-act="evSave"${S.readOnly?' disabled':''}>${f.id?'Save changes':'Add event'}</button>${f.id?`<button class="ghost danger" data-act="evDel" style="margin-left:auto">${S.confirm==='ev'+f.id?'Tap again to delete':'Delete event'}</button>`:''}</div>
   </section>`;
 }
@@ -595,9 +600,22 @@ const A={
     const ref=f.id?S.db.doc('events/'+f.id):S.db.collection('events').doc();
     // endsAt lets the database close replies once the event is over (times are Singapore time).
     const d={type:f.type,title:String(f.title||'').trim().slice(0,80),date:f.date,start:f.start,end:f.end,venue:String(f.venue||'').trim().slice(0,80),cost:String(f.cost||'').trim().slice(0,40),notes:String(f.notes||'').trim().slice(0,1000),
-      published:!!f.published,endsAt:new Date(Date.parse(f.date+'T'+f.end+':00+08:00')+(f.end<=f.start?864e5:0)),updatedAt:new Date().toISOString(),updatedBy:S.user.uid};
+      published:!!f.published,...(f.id&&S.events[f.id]&&S.events[f.id].announcedAt?{announcedAt:S.events[f.id].announcedAt}:{}),endsAt:new Date(Date.parse(f.date+'T'+f.end+':00+08:00')+(f.end<=f.start?864e5:0)),updatedAt:new Date().toISOString(),updatedBy:S.user.uid};
     if(await write(()=>ref.set(d),f.id?'Event saved':'Event added')){S.ev=null;S.calSel=f.date;S.calMonth=f.date.slice(0,7)}render()},
-  async evDel(){const f=S.ev;if(!f||!f.id||!armConfirm('ev'+f.id))return;if(await write(()=>S.db.doc('events/'+f.id).delete(),'Event deleted'))S.ev=null;render()},
+  // Deletes the event and everyone's replies to it together.
+  async evDel(){const f=S.ev;if(!f||!f.id||!armConfirm('ev'+f.id))return;
+    const ops=[['delete','events/'+f.id],...Object.keys(S.evReplies[f.id]||{}).map(mid=>['delete','eventReplies/'+f.id+'_'+mid])];
+    if(await write(()=>S.db.batch(ops),'Event deleted'))S.ev=null;render()},
+  evCopyAt(){const f=S.ev;if(!f||!f.id)return;const rv=S.evReplies[f.id]||{};
+    const left=S.members.filter(m=>m.active!==false&&!(m.id in rv));const at=left.filter(m=>m.tg).map(m=>'@'+m.tg);
+    if(!at.length)return toast('None of them have a Telegram @username saved.');
+    copyText(at.join(' '),`Copied ${at.length} @mention${at.length>1?'s':''}${left.length>at.length?` (${left.length-at.length} with no @username)`:''}`)},
+  async evPost(){const f=S.ev;const live=f&&f.id&&S.events[f.id];if(!live||!live.published||S.posting)return;
+    if(live.announcedAt&&!armConfirm('evpost'))return;
+    S.posting=true;render();
+    try{await announceEvent(f.id);toast('Posted to the group')}
+    catch(e){toast(e.message==='no_chat'?'The bot has no group set up yet.':e.message==='not_published'?'Save it with "Members can see this event" ticked first.':"Couldn't post it. Try again.")}
+    S.posting=false;render()},
   calMove({n}){const [y,m]=S.calMonth.split('-').map(Number);const d=new Date(y,m-1+(+n),1);S.calMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`},
   calToday(){const t=sgToday();S.calMonth=t.slice(0,7);S.calSel=t},
   openPlan({date}){location.hash='plan/'+date},
@@ -726,6 +744,8 @@ async function syncRoster(){
 }
 function start(){
   S.status='loading';render();S.db=db;
+  // Replies and reasons from the last 90 days only, so opening the planner doesn't download every reply ever made.
+  const since=sgDate(Date.now()-90*864e5);
   const fail=e=>{if(e&&e.code==='permission-denied'){S.status='denied';render()}};
   db.collection('members').onSnapshot(s=>{S.members=s.docs.map(x=>({id:x.id,...x.data()}));S.ready.m=1;afterData();syncRoster()},fail);
   db.collection('drills').onSnapshot(s=>{S.drills=s.docs.map(x=>({id:x.id,...x.data()}));S.ready.d=1;afterData()},fail);
@@ -734,11 +754,13 @@ function start(){
   db.collection('claims').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();if(x.id.startsWith('tg:'))o[v.memberId]=x.id});S.links=o;if(S.status==='ok')render()},()=>{});
   db.collection('linkRequests').onSnapshot(s=>{S.reqs=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>String(a.at).localeCompare(String(b.at)));if(S.status==='ok')render()},()=>{});
   db.collection('admins').onSnapshot(s=>{S.admins=s.docs.map(x=>({id:x.id,...x.data()})).sort((a,b)=>(adminName(a)||a.id).localeCompare(adminName(b)||b.id));if(S.status==='ok')render()},()=>{});
-  db.collection('events').onSnapshot(s=>{S.events=Object.fromEntries(s.docs.map(x=>[x.id,{...x.data(),id:x.id}]));if(S.status==='ok')render()},()=>{});
-  db.collection('eventReplies').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.eventId]=o[v.eventId]||{})[v.memberId]=v.going});S.evReplies=o;if(S.status==='ok')render()},()=>{});
+  // Event replies only for events in the last 90 days and ahead.
+  let evKey='',stopEv=()=>{};
+  db.collection('events').onSnapshot(s=>{S.events=Object.fromEntries(s.docs.map(x=>[x.id,{...x.data(),id:x.id}]));
+    const ids=Object.values(S.events).filter(e=>e.date>=since).map(e=>e.id).sort(),k=ids.join();
+    if(k!==evKey){evKey=k;stopEv();stopEv=db.watchIn('eventReplies','eventId',ids,s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.eventId]=o[v.eventId]||{})[v.memberId]=v.going});S.evReplies=o;if(S.status==='ok')render()},()=>{})}
+    if(S.status==='ok')render()},()=>{});
   db.collection('photos').onSnapshot(s=>{S.photos=Object.fromEntries(s.docs.map(x=>[x.id,x.data().src||'']));if(S.status==='ok')render()},()=>{});
-  // Replies and reasons from the last 90 days only, so opening the planner doesn't download every reply ever made.
-  const since=sgDate(Date.now()-90*864e5);
   let raw=[],notes={};
   const mergeReplies=()=>{const o={},inf={};raw.forEach(v=>{(o[v.date]=o[v.date]||{})[v.memberId]=v.going;(inf[v.date]=inf[v.date]||{})[v.memberId]={...v,...(notes[v.date+'_'+v.memberId]||{})}});S.rsvps=o;S.rinfo=inf;if(S.status==='ok')render()};
   db.collection('rsvps').where('date','>=',since).onSnapshot(s=>{raw=s.docs.map(x=>x.data());mergeReplies()},fail);

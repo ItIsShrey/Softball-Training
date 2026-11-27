@@ -284,12 +284,18 @@ function startData(){
   if(dataStarted)return;dataStarted=true;
   const today=sgToday();
   const fail=()=>{M.status='error';render()};
-  db.collection('sessions').where('published','==',true).onSnapshot(s=>{M.sessions=s.docs.map(x=>({...x.data(),date:x.id}));render()},fail);
+  // Only today's and later trainings (their ids are dates). If that query is ever refused, load all posted ones instead.
+  const gotSessions=s=>{M.sessions=s.docs.map(x=>({...x.data(),date:x.id}));render()};
+  db.collection('sessions').where('published','==',true).where('__name__','>=',today).onSnapshot(gotSessions,()=>db.collection('sessions').where('published','==',true).onSnapshot(gotSessions,fail));
   db.collection('photos').onSnapshot(s=>{M.photos=Object.fromEntries(s.docs.map(x=>[x.id,x.data().src||'']));
     if(!M.photosLoaded){M.photosLoaded=true;useTelegramPhoto(s.docs.some(x=>x.id===M.me))}render()},()=>{});
   db.collection('rsvpNotes').where('memberId','==',M.me).onSnapshot(s=>{M.notes=Object.fromEntries(s.docs.map(x=>[x.data().date,x.data()]));render()},()=>{});
-  db.collection('events').where('published','==',true).onSnapshot(s=>{M.events=s.docs.map(x=>({...x.data(),id:x.id}));render()},()=>{});
-  db.collection('eventReplies').onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.eventId]=o[v.eventId]||{})[v.memberId]=v.going});M.evReplies=o;render()},()=>{});
+  // Replies are loaded only for the upcoming events on screen, not for every event ever held.
+  let evKey='',stopEv=()=>{};
+  db.collection('events').where('published','==',true).onSnapshot(s=>{M.events=s.docs.map(x=>({...x.data(),id:x.id}));
+    const ids=M.events.filter(e=>e.date>=today&&!evOver(e)).map(e=>e.id).sort(),k=ids.join();
+    if(k!==evKey){evKey=k;stopEv();stopEv=db.watchIn('eventReplies','eventId',ids,s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.eventId]=o[v.eventId]||{})[v.memberId]=v.going});M.evReplies=o;render()},()=>{})}
+    render()},()=>{});
   db.collection('rsvps').where('date','>=',today).onSnapshot(s=>{const o={};s.docs.forEach(x=>{const v=x.data();(o[v.date]=o[v.date]||{})[v.memberId]={...v,status:v.status||(v.going?'yes':'no')}});M.rsvps=o;render()},fail);
 }
 

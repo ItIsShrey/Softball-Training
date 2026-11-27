@@ -104,7 +104,7 @@ The tests use a fake project, so they never touch the real database or its daily
 
 ## Tournaments, friendlies and socials
 
-On the Plan tab, pick a day and tap **+ Add a tournament, friendly or social**. Give it a title, time, place, and optionally a cost and details. Tick **Members can see this event and reply** to post it. Members see it in their list with the trainings and tap I'm going or Can't make it; replies close when the event ends. Open the event again to see who's going.
+On the Plan tab, pick a day and tap **+ Add a tournament, friendly or social**. Give it a title, time, place, and optionally a cost and details. Tick **Members can see this event and reply** to post it. Members see it in their list with the trainings and tap I'm going or Can't make it; replies close when the event ends. Open the event again to see who's going and who hasn't replied (with a button to copy their @usernames), or to post it to the Telegram group. Deleting an event deletes its replies too.
 
 ## Security
 

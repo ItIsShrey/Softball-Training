@@ -47,10 +47,12 @@ export async function notifyExcos(date, memberId) {
   } catch (e) {}
 }
 // Asks the bot to post a published training to the club's Telegram group. Only excos can.
-export async function announceTraining(date) {
+export const announceTraining = date => postToGroup('/announce', { date });
+export const announceEvent = id => postToGroup('/announce-event', { id });
+async function postToGroup(route, data) {
   const idToken = await auth.currentUser.getIdToken();
-  const res = await fetch(telegram.authUrl.replace(/\/auth\/telegram$/, '/announce'), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken, date }),
+  const res = await fetch(telegram.authUrl.replace(/\/auth\/telegram$/, route), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken, ...data }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || 'announce_failed');
@@ -101,4 +103,17 @@ async function batch(ops) {
   for (const [op, path, data] of ops) op === 'delete' ? b.delete(doc(fs, path)) : b.set(doc(fs, path), data);
   await b.commit();
 }
-export const db = { collection: col, doc: ref, batch };
+// Listens to the docs whose `field` is one of `ids` and calls next with all of them together.
+// Firestore takes at most 30 values per "in" query, so longer lists are split. Returns a function that stops listening.
+function watchIn(path, field, ids, next, err) {
+  const list = [...new Set(ids)].sort(), chunks = [];
+  for (let i = 0; i < list.length; i += 30) chunks.push(list.slice(i, i + 30));
+  if (!chunks.length) { next({ docs: [] }); return () => {}; }
+  const parts = chunks.map(() => null);
+  const stops = chunks.map((c, i) => onSnapshot(query(collection(fs, path), where(field, 'in', c)), s => {
+    parts[i] = wrapQuery(s).docs;
+    if (parts.every(Boolean)) next({ docs: parts.flat() });
+  }, err));
+  return () => stops.forEach(f => f());
+}
+export const db = { collection: col, doc: ref, batch, watchIn };
